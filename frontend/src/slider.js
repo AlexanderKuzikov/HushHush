@@ -22,6 +22,7 @@ export class Slider {
     this.interval = 5
     this.shuffleOrder = []
     this._cursorTimer = null
+    this._changing = false // защита от двойной смены
   }
 
   async init() {
@@ -29,6 +30,7 @@ export class Slider {
     this.interval = config.interval
     this.shuffle  = config.shuffle
     this.loop     = config.loop
+    this.ui.setDuration(this.interval)
     this.ui.syncControls(this)
 
     const lastFolder = await GetLastFolder()
@@ -47,20 +49,25 @@ export class Slider {
     this.buildShuffleOrder()
     this.index = 0
     this.ui.showStage()
-    await this.showCurrent()
+    await this.showCurrent(true)
     this.play()
   }
 
-  async showCurrent() {
-    if (this.images.length === 0) return
+  async showCurrent(immediate) {
+    if (this._changing || this.images.length === 0) return
+    this._changing = true
 
     const idx  = this.shuffle ? this.shuffleOrder[this.index] : this.index
     const path = this.images[idx]
 
-    const dataUri = await GetImageData(path)
-    this.ui.setImage(dataUri)
-    this.ui.setCounter(this.index + 1, this.images.length)
-    this.ui.setName(path.split(/[\\/]/).pop())
+    try {
+      const imgData = await GetImageData(path)
+      this.ui.setImage(imgData.data, imgData.orientation, immediate ? 0 : this.interval)
+      this.ui.setCounter(this.index + 1, this.images.length)
+      this.ui.setName(path.split(/[\\/]/).pop())
+    } finally {
+      this._changing = false
+    }
 
     // Фоновая предзагрузка следующих 3 кадров
     const nextPaths = []
@@ -74,7 +81,7 @@ export class Slider {
   }
 
   next() {
-    if (this.images.length === 0) return
+    if (this.images.length === 0 || this._changing) return
     if (this.index < this.images.length - 1) {
       this.index++
     } else if (this.loop) {
@@ -88,7 +95,7 @@ export class Slider {
   }
 
   prev() {
-    if (this.images.length === 0) return
+    if (this.images.length === 0 || this._changing) return
     this.index = this.index > 0 ? this.index - 1 : this.images.length - 1
     this.showCurrent()
   }
@@ -97,6 +104,7 @@ export class Slider {
     if (this.playing) return
     this.playing = true
     this.ui.setPlayState(true)
+    // Возобновляем Ken Burns (просто перезапускаем таймер)
     this.scheduleNext()
   }
 
@@ -104,6 +112,7 @@ export class Slider {
     this.playing = false
     this.ui.setPlayState(false)
     clearTimeout(this.timer)
+    this.ui.freezeAnimation()
   }
 
   togglePlay() {
@@ -113,6 +122,7 @@ export class Slider {
   scheduleNext() {
     clearTimeout(this.timer)
     this.timer = setTimeout(() => {
+      if (!this.playing) return
       this.next()
       if (this.playing) this.scheduleNext()
     }, this.interval * 1000)
@@ -120,6 +130,7 @@ export class Slider {
 
   setInterval(seconds) {
     this.interval = seconds
+    this.ui.setDuration(seconds)
     SetInterval(seconds)
     if (this.playing) {
       clearTimeout(this.timer)

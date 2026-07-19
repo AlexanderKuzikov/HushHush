@@ -32,6 +32,12 @@ type Config struct {
 	Loop       bool   `json:"loop"`
 }
 
+// ImageData — данные изображения для отображения
+type ImageData struct {
+	Data        string `json:"data"`        // data URI (base64)
+	Orientation int    `json:"orientation"` // EXIF ориентация (1-8)
+}
+
 // App — основная структура приложения
 type App struct {
 	ctx        context.Context
@@ -162,11 +168,12 @@ func (a *App) PreloadImages(paths []string) {
 
 // --- Работа с изображениями ---
 
-// GetImageData читает изображение с диска и возвращает data URI (base64)
-// Использует кеш прелоадера если доступно
-func (a *App) GetImageData(path string) string {
+// GetImageData читает изображение с диска, определяет EXIF-ориентацию
+// и возвращает data URI (base64) + ориентацию
+func (a *App) GetImageData(path string) ImageData {
+	result := ImageData{Data: "", Orientation: 1}
 	if path == "" {
-		return ""
+		return result
 	}
 
 	data := a.preloader.Get(path)
@@ -174,7 +181,7 @@ func (a *App) GetImageData(path string) string {
 		var err error
 		data, err = os.ReadFile(path)
 		if err != nil {
-			return ""
+			return result
 		}
 	}
 
@@ -183,7 +190,9 @@ func (a *App) GetImageData(path string) string {
 		mimeType = "image/jpeg"
 	}
 
-	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+	result.Data = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+	result.Orientation = readExifOrientation(path)
+	return result
 }
 
 // --- Вспомогательные ---

@@ -8,9 +8,10 @@
 </head>
 <body>
 
-  <!-- Область показа изображения -->
+  <!-- Область показа изображения (два слоя для cross-fade) -->
   <div id="stage">
-    <img id="current-img" src="" alt="" draggable="false" />
+    <img id="img-front" class="stage-img" src="" alt="" draggable="false" />
+    <img id="img-back" class="stage-img" src="" alt="" draggable="false" />
     <div id="empty-state">
       <div class="empty-icon">🖼️</div>
       <p>Перетащите папку сюда<br>или нажмите кнопку ниже</p>
