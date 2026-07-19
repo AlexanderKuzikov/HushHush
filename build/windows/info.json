@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "file_version": "1.0.0.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "1.0.0",
+      "CompanyName": "Alexander Kuzikov",
+      "FileDescription": "HushHush — Custom Photo Slideshow for Windows",
+      "LegalCopyright": "\u00a9 2026 Alexander Kuzikov",
+      "ProductName": "HushHush",
+      "Comments": "https://github.com/AlexanderKuzikov/HushHush"
+    }
+  }
+}
