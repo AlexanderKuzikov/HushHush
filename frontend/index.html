@@ -8,10 +8,15 @@
 </head>
 <body>
 
-  <!-- Область показа изображения (два слоя для cross-fade) -->
+  <!-- Область показа изображения -->
   <div id="stage">
+    <!-- Размытый фон (вместо чёрных полей) -->
+    <div id="stage-bg"></div>
+
+    <!-- Два слоя для cross-fade -->
     <img id="img-front" class="stage-img" src="" alt="" draggable="false" />
     <img id="img-back" class="stage-img" src="" alt="" draggable="false" />
+    
     <div id="empty-state">
       <div class="empty-icon">🖼️</div>
       <p>Перетащите папку сюда<br>или нажмите кнопку ниже</p>

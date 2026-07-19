@@ -17,39 +17,32 @@ function orientationCSS(orientation) {
   return `rotate(${t.rotate}deg) scale(${t.scaleX}, ${t.scaleY})`
 }
 
-// Ken Burns: случайное начальное смещение для эффекта панорамирования
+// Ken Burns: случайное начальное смещение
 function randomKenBurnsOrigin() {
   const positions = [
-    '50% 50%',   // центр
-    '30% 30%',   // верхний левый
-    '70% 30%',   // верхний правый
-    '30% 70%',   // нижний левый
-    '70% 70%',   // нижний правый
-    '50% 20%',   // верх
-    '50% 80%',   // низ
-    '20% 50%',   // лево
-    '80% 50%',   // право
+    '50% 50%', '30% 30%', '70% 30%', '30% 70%',
+    '70% 70%', '50% 20%', '50% 80%', '20% 50%', '80% 50%',
   ]
   return positions[Math.floor(Math.random() * positions.length)]
 }
 
 export class UI {
   constructor() {
-    this.stage      = document.getElementById('stage')
-    this.imgFront   = document.getElementById('img-front')
-    this.imgBack    = document.getElementById('img-back')
+    this.stageBg   = document.getElementById('stage-bg')
+    this.imgFront  = document.getElementById('img-front')
+    this.imgBack   = document.getElementById('img-back')
     this.emptyState = document.getElementById('empty-state')
-    this.controls   = document.getElementById('controls')
-    this.counter    = document.getElementById('img-counter')
-    this.nameEl     = document.getElementById('img-name')
-    this.btnPlay    = document.getElementById('btn-play')
+    this.controls  = document.getElementById('controls')
+    this.counter   = document.getElementById('img-counter')
+    this.nameEl    = document.getElementById('img-name')
+    this.btnPlay   = document.getElementById('btn-play')
     this.btnShuffle = document.getElementById('btn-shuffle')
     this.intervalInput  = document.getElementById('interval-input')
     this.intervalSlider = document.getElementById('interval-slider')
 
     this._visible = false
     this._activeImg = this.imgFront
-    this._currentDuration = 5 // текущий interval для анимации zoom
+    this._currentDuration = 5
     this._bindToggle()
   }
 
@@ -57,36 +50,54 @@ export class UI {
     this._currentDuration = Math.max(seconds, 1)
   }
 
-  setImage(dataUri, orientation, duration) {
-    this._currentDuration = Math.max(duration || this._currentDuration, 1)
+  setImage(imgData, duration) {
+    const { data: dataUri, orientation, width, height } = imgData
+    const dur = Math.max(duration || this._currentDuration, 1)
+    this._currentDuration = dur
 
+    // Определяем ориентацию изображения и экрана
+    const imgLandscape = width > 0 && height > 0 ? width > height : null
+    const screenLandscape = window.innerWidth > window.innerHeight
+
+    // Если размеры известны и ориентации совпадают — cover, иначе contain + blur
+    const useCover = imgLandscape !== null && imgLandscape === screenLandscape
+    const objectFit = useCover ? 'cover' : 'contain'
+
+    // Какой слой будет задним
     const backImg = this._activeImg === this.imgFront ? this.imgBack : this.imgFront
 
-    // Сброс анимации на заднем слое
+    // === Сброс backImg ===
     backImg.style.transition = 'none'
+    backImg.style.opacity = '1'
+    backImg.style.display = 'block'
+
+    // Применяем object-fit
+    backImg.style.objectFit = objectFit
+
+    // Устанавливаем transform для EXIF-ориентации и Ken Burns
     const orient = orientationCSS(orientation || 1)
     const origin = randomKenBurnsOrigin()
     backImg.style.transformOrigin = origin
-
-    // Начальное состояние: небольшой zoom + смещение от центра
     backImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
-    void backImg.offsetHeight // force reflow
 
-    // Устанавливаем src и показываем
+    void backImg.offsetHeight
+
+    // Загружаем новое изображение
     backImg.src = dataUri
+
+    // Классы
     backImg.classList.remove('exit')
     backImg.classList.add('active', 'enter')
 
-    // Запускаем Ken Burns анимацию: плавный zoom + небольшое движение
-    backImg.style.transition = `transform ${this._currentDuration}s linear`
-    // Конечное состояние: zoom ~1.08 со случайным направлением
-    const zoomTarget = 1.06 + Math.random() * 0.04 // 1.06–1.10
-    const dx = (Math.random() - 0.5) * 2  // -1..1
+    // Ken Burns анимация
+    const zoomTarget = 1.06 + Math.random() * 0.04
+    const dx = (Math.random() - 0.5) * 2
     const dy = (Math.random() - 0.5) * 2
+    backImg.style.transition = `transform ${dur}s linear, opacity 0.6s ease`
     backImg.style.transform = `${orient} scale(${zoomTarget}) translate(${dx}%, ${dy}%)`
 
-    // Старый передний слой — fade out с остановкой его анимации
-    this._activeImg.style.transition = `opacity 0.6s ease`
+    // === Старый слой: fade out ===
+    this._activeImg.style.transition = `opacity 0.6s ease, transform 0.6s ease`
     this._activeImg.classList.remove('active')
     this._activeImg.classList.add('exit')
     this._activeImg.style.opacity = '0'
@@ -94,31 +105,34 @@ export class UI {
     // Меняем активный слой
     this._activeImg = backImg
 
-    // Сбрасываем скрытие курсора
+    // === Размытый фон (только для contain) ===
+    if (!useCover) {
+      this.stageBg.style.backgroundImage = `url('${dataUri}')`
+      this.stageBg.style.display = 'block'
+    } else {
+      this.stageBg.style.display = 'none'
+    }
+
+    // Сброс курсора
     document.body.classList.remove('cursor-hidden')
 
-    // Убираем временные классы после анимации
+    // Убираем временные классы
     setTimeout(() => {
-      const allImgs = [this.imgFront, this.imgBack]
-      allImgs.forEach(img => {
+      ;[this.imgFront, this.imgBack].forEach(img => {
         img.classList.remove('enter', 'exit')
       })
     }, 700)
   }
 
-  // Остановить Ken Burns анимацию на текущем слое
   freezeAnimation() {
-    // Сбрасываем transition и фиксируем текущее состояние
     const style = window.getComputedStyle(this._activeImg)
-    const currentTransform = style.transform
     this._activeImg.style.transition = 'none'
-    this._activeImg.style.transform = currentTransform
+    this._activeImg.style.transform = style.transform
   }
 
   showStage() {
     this.emptyState.style.display = 'none'
     this.imgFront.style.display = 'block'
-    this.imgBack.style.display = 'block'
     this.imgFront.style.opacity = '1'
     this.imgFront.classList.add('active')
   }
@@ -147,9 +161,7 @@ export class UI {
     this.setPlayState(slider.playing)
   }
 
-  isVisible() {
-    return this._visible
-  }
+  isVisible() { return this._visible }
 
   toggleControls() {
     this._visible ? this.hideControls() : this.showControls()
@@ -170,11 +182,8 @@ export class UI {
 
   async toggleFullscreen() {
     const isFs = await WindowIsFullscreen()
-    if (isFs) {
-      WindowUnfullscreen()
-    } else {
-      WindowFullscreen()
-    }
+    if (isFs) WindowUnfullscreen()
+    else WindowFullscreen()
   }
 
   _bindToggle() {

@@ -22,7 +22,7 @@ export class Slider {
     this.interval = 5
     this.shuffleOrder = []
     this._cursorTimer = null
-    this._changing = false // защита от двойной смены
+    this._changing = false
   }
 
   async init() {
@@ -62,7 +62,7 @@ export class Slider {
 
     try {
       const imgData = await GetImageData(path)
-      this.ui.setImage(imgData.data, imgData.orientation, immediate ? 0 : this.interval)
+      this.ui.setImage(imgData, immediate ? 0 : this.interval)
       this.ui.setCounter(this.index + 1, this.images.length)
       this.ui.setName(path.split(/[\\/]/).pop())
     } finally {
@@ -104,7 +104,6 @@ export class Slider {
     if (this.playing) return
     this.playing = true
     this.ui.setPlayState(true)
-    // Возобновляем Ken Burns (просто перезапускаем таймер)
     this.scheduleNext()
   }
 
@@ -177,7 +176,7 @@ export class Slider {
       this.setInterval(v)
     })
 
-    // Управление курсором: показываем при любом движении, скрываем через 3 сек бездействия
+    // Управление курсором
     const showCursor = () => {
       document.body.classList.remove('cursor-hidden')
       clearTimeout(this._cursorTimer)

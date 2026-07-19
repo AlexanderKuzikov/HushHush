@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
 	"mime"
 	"os"
 	"path/filepath"
@@ -36,6 +38,8 @@ type Config struct {
 type ImageData struct {
 	Data        string `json:"data"`        // data URI (base64)
 	Orientation int    `json:"orientation"` // EXIF ориентация (1-8)
+	Width       int    `json:"width"`       // ширина в пикселях
+	Height      int    `json:"height"`      // высота в пикселях
 }
 
 // App — основная структура приложения
@@ -168,8 +172,29 @@ func (a *App) PreloadImages(paths []string) {
 
 // --- Работа с изображениями ---
 
-// GetImageData читает изображение с диска, определяет EXIF-ориентацию
-// и возвращает data URI (base64) + ориентацию
+// decodeImageConfig определяет размеры изображения (без полной декомпрессии)
+func decodeImageConfig(data []byte, ext string) (width, height int) {
+	ext = strings.ToLower(ext)
+
+	// Для AVIF нет встроенного декодера — пропускаем
+	if ext == ".avif" {
+		return 0, 0
+	}
+
+	// Пробуем стандартные декодеры
+	var cfg image.Config
+	var err error
+
+	cfg, _, err = image.DecodeConfig(bytes.NewReader(data))
+
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
+}
+
+// GetImageData читает изображение с диска, определяет EXIF-ориентацию,
+// размеры и возвращает data URI (base64)
 func (a *App) GetImageData(path string) ImageData {
 	result := ImageData{Data: "", Orientation: 1}
 	if path == "" {
@@ -192,6 +217,18 @@ func (a *App) GetImageData(path string) ImageData {
 
 	result.Data = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 	result.Orientation = readExifOrientation(path)
+
+	// Определяем размеры изображения
+	ext := filepath.Ext(path)
+	w, h := decodeImageConfig(data, ext)
+	result.Width = w
+	result.Height = h
+
+	// Если EXIF говорит о повороте на 90/270 — меняем W/H местами
+	if result.Orientation == 6 || result.Orientation == 8 {
+		result.Width, result.Height = h, w
+	}
+
 	return result
 }
 

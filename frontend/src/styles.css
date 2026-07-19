@@ -28,6 +28,18 @@ body.cursor-hidden { cursor: none; }
   background: #000;
 }
 
+/* Размытый фон для изображений с нестандартным соотношением сторон */
+#stage-bg {
+  position: absolute;
+  inset: -60px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px);
+  opacity: 0.7;
+  z-index: 0;
+  transition: none;
+}
+
 /* Два слоя для cross-fade */
 .stage-img {
   position: absolute;
