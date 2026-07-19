@@ -9,8 +9,6 @@ import {
   PreloadImages,
   GetImageData,
 } from '../wailsjs/go/main/App.js'
-import { Quit } from '../wailsjs/runtime/runtime.js'
-import { UI } from './ui.js'
 
 export class Slider {
   constructor(ui) {
@@ -130,9 +128,10 @@ export class Slider {
   }
 
   setInterval(seconds) {
-    this.interval = seconds
-    this.ui.setDuration(seconds)
-    SetInterval(seconds)
+    this.interval = Math.max(1, Math.min(3600, seconds))
+    this.ui.setDuration(this.interval)
+    this.ui.syncControls(this)
+    SetInterval(this.interval)
     if (this.playing) {
       clearTimeout(this.timer)
       this.scheduleNext()
@@ -155,33 +154,39 @@ export class Slider {
   }
 
   bindEvents() {
-    // Кнопки
-    const byId = (id) => document.getElementById(id)
-    byId('btn-folder').addEventListener('click',       (e) => { e.stopPropagation(); this.openFolder() })
-    byId('btn-open').addEventListener('click',         (e) => { e.stopPropagation(); this.openFolder() })
-    byId('btn-prev').addEventListener('click',         (e) => { e.stopPropagation(); this.prev();         this.resetTimer() })
-    byId('btn-next').addEventListener('click',         (e) => { e.stopPropagation(); this.next();         this.resetTimer() })
-    byId('btn-play').addEventListener('click',         (e) => { e.stopPropagation(); this.togglePlay() })
-    byId('btn-shuffle').addEventListener('click',      (e) => { e.stopPropagation(); this.toggleShuffle() })
-    byId('btn-fullscreen').addEventListener('click',   (e) => { e.stopPropagation(); this.ui.toggleFullscreen() })
-    byId('btn-quit').addEventListener('click',         (e) => { e.stopPropagation(); this.ui.quit() })
+    const $ = (id) => document.getElementById(id)
 
-    // Интервал
-    const intervalInput  = byId('interval-input')
-    const intervalSlider = byId('interval-slider')
-    intervalInput.addEventListener('change', (e) => {
-      const v = Math.max(1, Math.min(3600, parseInt(e.target.value) || 5))
-      intervalInput.value  = v
-      intervalSlider.value = Math.min(v, 60)
+    $('btn-folder').addEventListener('click',    (e) => { e.stopPropagation(); this.openFolder() })
+    $('btn-open').addEventListener('click',      (e) => { e.stopPropagation(); this.openFolder() })
+    $('btn-prev').addEventListener('click',      (e) => { e.stopPropagation(); this.prev();         this.resetTimer() })
+    $('btn-next').addEventListener('click',      (e) => { e.stopPropagation(); this.next();         this.resetTimer() })
+    $('btn-play').addEventListener('click',      (e) => { e.stopPropagation(); this.togglePlay() })
+    $('btn-shuffle').addEventListener('click',   (e) => { e.stopPropagation(); this.toggleShuffle() })
+    $('btn-fullscreen').addEventListener('click',(e) => { e.stopPropagation(); this.ui.toggleFullscreen() })
+    $('btn-quit').addEventListener('click',      (e) => { e.stopPropagation(); this.ui.quit() })
+
+    // Интервал: числовое поле — реагируем на Enter и blur
+    const intervalInput  = $('interval-input')
+    const intervalSlider = $('interval-slider')
+
+    const applyInterval = () => {
+      const v = parseInt(intervalInput.value) || 5
+      intervalInput.value = v
       this.setInterval(v)
+    }
+
+    intervalInput.addEventListener('change', applyInterval)
+    intervalInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); intervalInput.blur() }
     })
+
     intervalSlider.addEventListener('input', (e) => {
       const v = parseInt(e.target.value)
       intervalInput.value = v
       this.setInterval(v)
     })
 
-    // Курсор
+    // Управление курсором
     const showCursor = () => {
       document.body.classList.remove('cursor-hidden')
       clearTimeout(this._cursorTimer)
@@ -204,13 +209,15 @@ export class Slider {
         case ' ':       e.preventDefault(); this.next();  this.resetTimer(); break
         case 'ArrowLeft': e.preventDefault(); this.prev(); this.resetTimer(); break
         case '+':
-        case '=':       this.setInterval(Math.min(this.interval + 1, 3600)); this.ui.syncControls(this); break
-        case '-':       this.setInterval(Math.max(this.interval - 1, 1));    this.ui.syncControls(this); break
+        case '=':       this.setInterval(this.interval + 1); break
+        case '-':       this.setInterval(this.interval - 1); break
         case 'f':
         case 'F':       this.ui.toggleFullscreen(); break
         case 's':
         case 'S':       this.toggleShuffle(); break
         case 'Escape':  this.ui.hideControls(); break
+        case 'q':
+        case 'Q':       this.ui.quit(); break
       }
     })
 
