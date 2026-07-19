@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HushHush</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+
+  <!-- Область показа изображения -->
+  <div id="stage">
+    <img id="current-img" src="" alt="" draggable="false" />
+    <div id="empty-state">
+      <div class="empty-icon">🖼️</div>
+      <p>Перетащите папку сюда<br>или нажмите кнопку ниже</p>
+      <button id="btn-open">Открыть папку</button>
+    </div>
+  </div>
+
+  <!-- Панель управления (скрыта по умолчанию) -->
+  <div id="controls">
+    <div class="controls-left">
+      <button id="btn-prev" title="Назад [←]">&#9664;</button>
+      <button id="btn-play" title="Пауза/Воспроизведение [Space]">&#9646;&#9646;</button>
+      <button id="btn-next" title="Вперёд [→]">&#9654;</button>
+    </div>
+
+    <div class="controls-center">
+      <span id="img-counter">0 / 0</span>
+      <span id="img-name"></span>
+    </div>
+
+    <div class="controls-right">
+      <!-- Интервал -->
+      <label class="interval-label">
+        <span>⏱</span>
+        <input type="number" id="interval-input" min="1" max="3600" value="5" title="Интервал (сек)" />
+        <span>с</span>
+      </label>
+      <input type="range" id="interval-slider" min="1" max="60" value="5" title="Интервал смены кадра" />
+
+      <!-- Shuffle -->
+      <button id="btn-shuffle" title="Случайный порядок [S]">🔀</button>
+
+      <!-- Fullscreen -->
+      <button id="btn-fullscreen" title="Полный экран [F]">⛶</button>
+
+      <!-- Открыть папку -->
+      <button id="btn-folder" title="Открыть папку">📁</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
