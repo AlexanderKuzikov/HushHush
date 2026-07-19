@@ -2,9 +2,8 @@ import {
   WindowFullscreen, WindowUnfullscreen, WindowIsFullscreen,
   Quit
 } from '../wailsjs/runtime/runtime.js'
-import { SetTransition, SetKenBurns } from '../wailsjs/go/main/App.js'
+import { SetTransition } from '../wailsjs/go/main/App.js'
 
-// EXIF-ориентация
 const ORIENTATION_MAP = {
   1: { rotate: 0,       scaleX: 1, scaleY: 1 },
   2: { rotate: 0,       scaleX: -1, scaleY: 1 },
@@ -70,7 +69,6 @@ export class UI {
   setImage(imgData, duration) {
     const { data: dataUri, orientation, width, height } = imgData
     const dur = Math.max(duration || this._currentDuration, 1)
-    this._currentDuration = dur
 
     const imgLandscape = width > 0 && height > 0 ? width > height : null
     const scrLandscape = window.innerWidth > window.innerHeight
@@ -80,7 +78,7 @@ export class UI {
     const newImg = this._activeImg === this.imgFront ? this.imgBack : this.imgFront
     const oldImg = this._activeImg
 
-    // Сброс нового слоя
+    // Сброс
     newImg.style.transition = 'none'
     newImg.style.opacity = '1'
     newImg.style.display = 'block'
@@ -93,25 +91,28 @@ export class UI {
 
     const { transition, kenBurns } = this.effects
 
-    // Начальное положение по умолчанию
+    // Начальное положение
     newImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
 
     switch (transition) {
       case 'fade':
-        // Без transform-анимации, только cross-fade
-        newImg.style.transition = 'none'
+        // Только cross-fade
         void newImg.offsetHeight
         break
 
-      case 'zoom':
-        // Zoom-in при входе: scale(0.92) → scale(1.0) за 0.5s
-        newImg.style.transform = `${orient} scale(0.92)`
+      case 'zoom': {
+        // Zoom-out при входе: scale(1.08) → scale(1.0) за 0.6s
+        const zoomStart = 1.06 + Math.random() * 0.06 // 1.06–1.12
+        const dx = (Math.random() - 0.5) * 2
+        const dy = (Math.random() - 0.5) * 2
+        newImg.style.transform = `${orient} scale(${zoomStart}) translate(${dx}%, ${dy}%)`
         void newImg.offsetHeight
-        newImg.style.transition = `transform 0.5s ease-out, opacity 0.6s ease`
-        newImg.style.transform = `${orient} scale(1.0)`
+        newImg.style.transition = `transform 0.6s ease-out, opacity 0.6s ease`
+        newImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
         break
+      }
 
-      case 'blur':
+      case 'blur': {
         // Blur-in: blur(6px) → none за 0.6s
         newImg.style.filter = 'blur(6px)'
         newImg.style.transform = orient
@@ -119,6 +120,7 @@ export class UI {
         newImg.style.filter = ''
         newImg.style.transition = `filter 0.6s ease-out, opacity 0.6s ease`
         break
+      }
 
       default: // kenburns — без вступительной анимации
         break
@@ -128,7 +130,7 @@ export class UI {
     newImg.classList.remove('exit')
     newImg.classList.add('active', 'enter')
 
-    // Старый слой: fade out
+    // Старый слой
     oldImg.style.transition = `opacity 0.6s ease, transform 0.6s ease`
     oldImg.classList.remove('active')
     oldImg.classList.add('exit')
@@ -144,18 +146,18 @@ export class UI {
       this.stageBg.style.display = 'none'
     }
 
-    // Ken Burns (медленный zoom) — запускаем после вступительной анимации
+    // Ken Burns (медленный zoom) после вступительной анимации
     if (kenBurns) {
-      const zoomTarget = 1.06 + Math.random() * 0.04
+      const kbTarget = 1.06 + Math.random() * 0.04
       const dx = (Math.random() - 0.5) * 2
       const dy = (Math.random() - 0.5) * 2
-      const kbEnd = `${orient} scale(${zoomTarget}) translate(${dx}%, ${dy}%)`
+      const kbEnd = `${orient} scale(${kbTarget}) translate(${dx}%, ${dy}%)`
 
-      // Запускаем Ken Burns через небольшой delay (после вступительной анимации)
+      const delay = (transition === 'blur' || transition === 'zoom') ? 700 : 100
       setTimeout(() => {
         newImg.style.transition = `transform ${Math.max(dur, 2)}s linear, opacity 0.6s ease`
         newImg.style.transform = kbEnd
-      }, transition === 'blur' || transition === 'zoom' ? 600 : 100)
+      }, delay)
     }
 
     document.body.classList.remove('cursor-hidden')
@@ -164,7 +166,7 @@ export class UI {
       ;[this.imgFront, this.imgBack].forEach(img => {
         img.classList.remove('enter', 'exit')
       })
-    }, 700)
+    }, 800)
   }
 
   freezeAnimation() {
@@ -177,6 +179,7 @@ export class UI {
     this.emptyState.style.display = 'none'
     this.imgFront.style.display = 'block'
     this.imgFront.style.opacity = '1'
+    this.imgFront.style.transform = orientationCSS(1) + ' scale(1.0)'
     this.imgFront.classList.add('active')
   }
 
@@ -225,16 +228,19 @@ export class UI {
   }
 
   async toggleFullscreen() {
-    const isFs = await WindowIsFullscreen()
-    if (isFs) WindowUnfullscreen()
-    else WindowFullscreen()
+    try {
+      const isFs = await WindowIsFullscreen()
+      if (isFs) WindowUnfullscreen()
+      else WindowFullscreen()
+    } catch (e) {
+      // fallback для старых версий
+      try { window.runtime.WindowFullscreen() } catch (_) {}
+    }
   }
 
   quit() {
-    try {
-      Quit()
-    } catch (e) {
-      window.runtime.Quit()
+    try { Quit() } catch (_) {
+      try { window.runtime.Quit() } catch (_) {}
     }
   }
 
@@ -251,7 +257,7 @@ export class UI {
         e.stopPropagation()
         const effect = btn.dataset.effect
         this.effects.transition = effect
-        await SetTransition(effect)
+        try { await SetTransition(effect) } catch (_) {}
         this._highlightEffect()
         this._hideEffects()
       })
@@ -279,13 +285,11 @@ export class UI {
       const inControls = this.controls.contains(e.target)
       const inEmpty    = this.emptyState.contains(e.target)
       const inEffects  = this.effectsMenu.contains(e.target)
-
       if (inEffects) return
 
       if (!inControls && !inEmpty) {
         this.toggleControls()
       }
-
       if (!this.btnEffects.contains(e.target)) {
         this._hideEffects()
       }

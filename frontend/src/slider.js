@@ -23,32 +23,44 @@ export class Slider {
     this.shuffleOrder = []
     this._cursorTimer = null
     this._changing = false
-  }
+    this._ready = false
 
-  async init() {
-    const config = await GetConfig()
-    this.interval = config.interval
-    this.shuffle  = config.shuffle
-    this.loop     = config.loop
-    this.ui.applyConfig(config)
-    this.ui.setDuration(this.interval)
-    this.ui.syncControls(this)
-
-    const lastFolder = await GetLastFolder()
-    if (lastFolder) {
-      await this.loadFolder(lastFolder)
-    }
-
+    // bindEvents вызывается в конструкторе — кнопки работают сразу
     this.bindEvents()
   }
 
+  async init() {
+    try {
+      const config = await GetConfig()
+      this.interval = config.interval || 5
+      this.shuffle  = !!config.shuffle
+      this.loop     = config.loop !== false
+      this.ui.applyConfig(config)
+      this.ui.setDuration(this.interval)
+      this.ui.syncControls(this)
+
+      const lastFolder = await GetLastFolder()
+      if (lastFolder) {
+        await this.loadFolder(lastFolder)
+      }
+    } catch (err) {
+      console.error('Init error:', err)
+    }
+  }
+
   async loadFolder(folder) {
-    const images = await GetImages(folder)
+    let images
+    try {
+      images = await GetImages(folder)
+    } catch (e) {
+      return
+    }
     if (!images || images.length === 0) return
 
     this.images = images
     this.buildShuffleOrder()
     this.index = 0
+    this._ready = true
     this.ui.showStage()
     await this.showCurrent(true)
     this.play()
@@ -70,6 +82,7 @@ export class Slider {
       this._changing = false
     }
 
+    // Предзагрузка следующих 3
     const nextPaths = []
     for (let i = 1; i <= 3; i++) {
       const ni = (this.shuffle
@@ -156,16 +169,29 @@ export class Slider {
   bindEvents() {
     const $ = (id) => document.getElementById(id)
 
+    // Эти кнопки работают всегда, даже до загрузки изображений
     $('btn-folder').addEventListener('click',    (e) => { e.stopPropagation(); this.openFolder() })
     $('btn-open').addEventListener('click',      (e) => { e.stopPropagation(); this.openFolder() })
-    $('btn-prev').addEventListener('click',      (e) => { e.stopPropagation(); this.prev();         this.resetTimer() })
-    $('btn-next').addEventListener('click',      (e) => { e.stopPropagation(); this.next();         this.resetTimer() })
     $('btn-play').addEventListener('click',      (e) => { e.stopPropagation(); this.togglePlay() })
     $('btn-shuffle').addEventListener('click',   (e) => { e.stopPropagation(); this.toggleShuffle() })
     $('btn-fullscreen').addEventListener('click',(e) => { e.stopPropagation(); this.ui.toggleFullscreen() })
     $('btn-quit').addEventListener('click',      (e) => { e.stopPropagation(); this.ui.quit() })
 
-    // Интервал: числовое поле — реагируем на Enter и blur
+    // Prev/Next — проверяют images.length
+    $('btn-prev').addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.images.length === 0) return
+      this.prev()
+      this.resetTimer()
+    })
+    $('btn-next').addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.images.length === 0) return
+      this.next()
+      this.resetTimer()
+    })
+
+    // Интервал
     const intervalInput  = $('interval-input')
     const intervalSlider = $('interval-slider')
 
@@ -186,7 +212,7 @@ export class Slider {
       this.setInterval(v)
     })
 
-    // Управление курсором
+    // Курсор
     const showCursor = () => {
       document.body.classList.remove('cursor-hidden')
       clearTimeout(this._cursorTimer)
@@ -204,20 +230,29 @@ export class Slider {
 
     // Клавиатура
     document.addEventListener('keydown', (e) => {
+      // Не обрабатываем если фокус в поле ввода
+      if (e.target.tagName === 'INPUT') return
+
       switch (e.key) {
         case 'ArrowRight':
-        case ' ':       e.preventDefault(); this.next();  this.resetTimer(); break
-        case 'ArrowLeft': e.preventDefault(); this.prev(); this.resetTimer(); break
+          if (this.images.length === 0) break
+          e.preventDefault(); this.next(); this.resetTimer(); break
+        case ' ':
+          if (this.images.length === 0) break
+          e.preventDefault(); this.togglePlay(); break
+        case 'ArrowLeft':
+          if (this.images.length === 0) break
+          e.preventDefault(); this.prev(); this.resetTimer(); break
         case '+':
-        case '=':       this.setInterval(this.interval + 1); break
-        case '-':       this.setInterval(this.interval - 1); break
+        case '=': this.setInterval(this.interval + 1); break
+        case '-': this.setInterval(this.interval - 1); break
         case 'f':
-        case 'F':       this.ui.toggleFullscreen(); break
+        case 'F': this.ui.toggleFullscreen(); break
         case 's':
-        case 'S':       this.toggleShuffle(); break
-        case 'Escape':  this.ui.hideControls(); break
+        case 'S': this.toggleShuffle(); break
+        case 'Escape': this.ui.hideControls(); break
         case 'q':
-        case 'Q':       this.ui.quit(); break
+        case 'Q': this.ui.quit(); break
       }
     })
 
