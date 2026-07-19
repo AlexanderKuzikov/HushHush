@@ -12,10 +12,11 @@ html, body {
   color: #fff;
   font-family: 'Segoe UI', system-ui, sans-serif;
   user-select: none;
-  cursor: none; /* по умолчанию курсор скрыт */
+  cursor: default;
 }
 
 body.controls-visible { cursor: default; }
+body.cursor-hidden { cursor: none; }
 
 /* --- Stage --- */
 #stage {

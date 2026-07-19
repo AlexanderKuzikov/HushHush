@@ -7,7 +7,8 @@ import {
   SetLoop,
   GetLastFolder,
   PreloadImages,
-} from '../../wailsjs/go/main/App.js'
+  GetImageData,
+} from '../wailsjs/go/main/App.js'
 
 export class Slider {
   constructor(ui) {
@@ -20,6 +21,7 @@ export class Slider {
     this.loop = true
     this.interval = 5
     this.shuffleOrder = []
+    this._cursorTimer = null
   }
 
   async init() {
@@ -45,17 +47,18 @@ export class Slider {
     this.buildShuffleOrder()
     this.index = 0
     this.ui.showStage()
-    this.showCurrent()
+    await this.showCurrent()
     this.play()
   }
 
-  showCurrent() {
+  async showCurrent() {
     if (this.images.length === 0) return
 
     const idx  = this.shuffle ? this.shuffleOrder[this.index] : this.index
     const path = this.images[idx]
 
-    this.ui.setImage(path)
+    const dataUri = await GetImageData(path)
+    this.ui.setImage(dataUri)
     this.ui.setCounter(this.index + 1, this.images.length)
     this.ui.setName(path.split(/[\\/]/).pop())
 
@@ -162,6 +165,23 @@ export class Slider {
       intervalInput.value = v
       this.setInterval(v)
     })
+
+    // Управление курсором: показываем при любом движении, скрываем через 3 сек бездействия
+    const showCursor = () => {
+      document.body.classList.remove('cursor-hidden')
+      clearTimeout(this._cursorTimer)
+      if (this.playing) {
+        this._cursorTimer = setTimeout(() => {
+          if (!this.ui.isVisible()) {
+            document.body.classList.add('cursor-hidden')
+          }
+        }, 3000)
+      }
+    }
+
+    document.addEventListener('mousemove', showCursor)
+    document.addEventListener('mousedown', showCursor)
+    document.addEventListener('keydown', showCursor)
 
     // Клавиатура
     document.addEventListener('keydown', (e) => {

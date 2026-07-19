@@ -35,12 +35,11 @@ func main() {
 			app,
 		},
 		Windows: &windows.Options{
-			WebviewIsTransparent:              false,
-			WindowIsTranslucent:               false,
-			DisableWindowIcon:                 false,
-			IsZoomControlEnabled:              false,
-			UseToolbar:                        false,
-			Theme:                             windows.Dark,
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
+			DisableWindowIcon:    false,
+			IsZoomControlEnabled: false,
+			Theme:                windows.Dark,
 		},
 	})
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"mime"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,10 +26,10 @@ var supportedFormats = map[string]bool{
 
 // Config — настройки приложения, сохраняются в %APPDATA%/HushHush/config.json
 type Config struct {
-	LastFolder  string `json:"lastFolder"`
-	Interval    int    `json:"interval"`    // секунды между кадрами
-	Shuffle     bool   `json:"shuffle"`
-	Loop        bool   `json:"loop"`
+	LastFolder string `json:"lastFolder"`
+	Interval   int    `json:"interval"` // секунды между кадрами
+	Shuffle    bool   `json:"shuffle"`
+	Loop       bool   `json:"loop"`
 }
 
 // App — основная структура приложения
@@ -156,6 +158,32 @@ func (a *App) PreloadImages(paths []string) {
 	if a.preloader != nil {
 		a.preloader.Preload(paths)
 	}
+}
+
+// --- Работа с изображениями ---
+
+// GetImageData читает изображение с диска и возвращает data URI (base64)
+// Использует кеш прелоадера если доступно
+func (a *App) GetImageData(path string) string {
+	if path == "" {
+		return ""
+	}
+
+	data := a.preloader.Get(path)
+	if data == nil {
+		var err error
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+	}
+
+	mimeType := mime.TypeByExtension(filepath.Ext(path))
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // --- Вспомогательные ---

@@ -6,7 +6,7 @@
 |---|---|---|
 | Go | 1.26.5+ | https://go.dev/dl/ |
 | Node.js | v24 LTS | https://nodejs.org |
-| Wails CLI | v2.12.0 | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
+| Wails CLI | v2.12.0+ | `go install github.com/wailsapp/wails/v2/cmd/wails@latest` |
 
 ## Порядок первого запуск
 
@@ -31,7 +31,7 @@ wails dev
 
 ## Что проверить при первом запуске
 
-- [ ] Окно открылось без ошибок
+- [x] Окно открылось без ошибок
 - [ ] Появляется экран с иконкой папки и кнопкой «Открыть папку»
 - [ ] После выбора папки изображения отображаются
 - [ ] Смена кадров по таймеру работает
@@ -56,4 +56,5 @@ wails build
 
 | # | Описание | Статус |
 |---|---|---|
-| | | |
+| 1 | `UseToolbar` — удалён в Wails v2.13.0, убрано из main.go | ✅ Исправлено |
+| 2 | Неверный путь импорта wailsjs в slider.js (`../../wailsjs` → `../wailsjs`) | ✅ Исправлено |

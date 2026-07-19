@@ -15,20 +15,16 @@ export class UI {
     this._bindToggle()
   }
 
-  // Путь к файлу: Wails передаёт нативный путь Windows, преобразуем в URI
-  _pathToSrc(filePath) {
-    // Заменяем обратные слеши на прямые и кодируем спецсимволы
-    const normalized = filePath.replace(/\\/g, '/')
-    return 'wails://localhost/' + normalized.split('/').map(encodeURIComponent).join('/')
-  }
-
-  setImage(filePath) {
+  setImage(dataUri) {
     this.imgEl.classList.add('fade-out')
     setTimeout(() => {
-      this.imgEl.src = this._pathToSrc(filePath)
+      this.imgEl.src = dataUri
       this.imgEl.classList.remove('fade-out')
       this.imgEl.classList.add('fade-in')
     }, 200)
+
+    // Сбрасываем скрытие курсора при смене кадра
+    document.body.classList.remove('cursor-hidden')
   }
 
   showStage() {
@@ -37,7 +33,7 @@ export class UI {
   }
 
   setCounter(current, total) {
-    this.counter.textContent = `${current} / ${total}`
+    this.counter.textContent = `${current} / ${total}`
   }
 
   setName(name) {
@@ -60,6 +56,10 @@ export class UI {
     this.setPlayState(slider.playing)
   }
 
+  isVisible() {
+    return this._visible
+  }
+
   // Панель показывается / скрывается только по явному действию
   toggleControls() {
     this._visible ? this.hideControls() : this.showControls()
@@ -68,11 +68,14 @@ export class UI {
   showControls() {
     this._visible = true
     this.controls.classList.add('visible')
+    document.body.classList.remove('cursor-hidden')
+    document.body.classList.add('controls-visible')
   }
 
   hideControls() {
     this._visible = false
     this.controls.classList.remove('visible')
+    document.body.classList.remove('controls-visible')
   }
 
   toggleFullscreen() {
