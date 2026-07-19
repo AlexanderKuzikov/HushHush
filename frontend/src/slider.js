@@ -9,6 +9,8 @@ import {
   PreloadImages,
   GetImageData,
 } from '../wailsjs/go/main/App.js'
+import { Quit } from '../wailsjs/runtime/runtime.js'
+import { UI } from './ui.js'
 
 export class Slider {
   constructor(ui) {
@@ -30,6 +32,7 @@ export class Slider {
     this.interval = config.interval
     this.shuffle  = config.shuffle
     this.loop     = config.loop
+    this.ui.applyConfig(config)
     this.ui.setDuration(this.interval)
     this.ui.syncControls(this)
 
@@ -69,7 +72,6 @@ export class Slider {
       this._changing = false
     }
 
-    // Фоновая предзагрузка следующих 3 кадров
     const nextPaths = []
     for (let i = 1; i <= 3; i++) {
       const ni = (this.shuffle
@@ -153,17 +155,20 @@ export class Slider {
   }
 
   bindEvents() {
-    document.getElementById('btn-folder').addEventListener('click',    (e) => { e.stopPropagation(); this.openFolder() })
-    document.getElementById('btn-open').addEventListener('click',      (e) => { e.stopPropagation(); this.openFolder() })
-    document.getElementById('btn-prev').addEventListener('click',      (e) => { e.stopPropagation(); this.prev();         this.resetTimer() })
-    document.getElementById('btn-next').addEventListener('click',      (e) => { e.stopPropagation(); this.next();         this.resetTimer() })
-    document.getElementById('btn-play').addEventListener('click',      (e) => { e.stopPropagation(); this.togglePlay() })
-    document.getElementById('btn-shuffle').addEventListener('click',   (e) => { e.stopPropagation(); this.toggleShuffle() })
-    document.getElementById('btn-fullscreen').addEventListener('click',(e) => { e.stopPropagation(); this.ui.toggleFullscreen() })
+    // Кнопки
+    const byId = (id) => document.getElementById(id)
+    byId('btn-folder').addEventListener('click',       (e) => { e.stopPropagation(); this.openFolder() })
+    byId('btn-open').addEventListener('click',         (e) => { e.stopPropagation(); this.openFolder() })
+    byId('btn-prev').addEventListener('click',         (e) => { e.stopPropagation(); this.prev();         this.resetTimer() })
+    byId('btn-next').addEventListener('click',         (e) => { e.stopPropagation(); this.next();         this.resetTimer() })
+    byId('btn-play').addEventListener('click',         (e) => { e.stopPropagation(); this.togglePlay() })
+    byId('btn-shuffle').addEventListener('click',      (e) => { e.stopPropagation(); this.toggleShuffle() })
+    byId('btn-fullscreen').addEventListener('click',   (e) => { e.stopPropagation(); this.ui.toggleFullscreen() })
+    byId('btn-quit').addEventListener('click',         (e) => { e.stopPropagation(); this.ui.quit() })
 
-    // Интервал: числовое поле
-    const intervalInput  = document.getElementById('interval-input')
-    const intervalSlider = document.getElementById('interval-slider')
+    // Интервал
+    const intervalInput  = byId('interval-input')
+    const intervalSlider = byId('interval-slider')
     intervalInput.addEventListener('change', (e) => {
       const v = Math.max(1, Math.min(3600, parseInt(e.target.value) || 5))
       intervalInput.value  = v
@@ -176,7 +181,7 @@ export class Slider {
       this.setInterval(v)
     })
 
-    // Управление курсором
+    // Курсор
     const showCursor = () => {
       document.body.classList.remove('cursor-hidden')
       clearTimeout(this._cursorTimer)
@@ -188,7 +193,6 @@ export class Slider {
         }, 3000)
       }
     }
-
     document.addEventListener('mousemove', showCursor)
     document.addEventListener('mousedown', showCursor)
     document.addEventListener('keydown', showCursor)

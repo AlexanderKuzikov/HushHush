@@ -18,7 +18,6 @@ html, body {
 body.controls-visible { cursor: default; }
 body.cursor-hidden { cursor: none; }
 
-/* --- Stage --- */
 #stage {
   position: fixed;
   inset: 0;
@@ -28,7 +27,6 @@ body.cursor-hidden { cursor: none; }
   background: #000;
 }
 
-/* Размытый фон для изображений с нестандартным соотношением сторон */
 #stage-bg {
   position: absolute;
   inset: -60px;
@@ -40,7 +38,6 @@ body.cursor-hidden { cursor: none; }
   transition: none;
 }
 
-/* Два слоя для cross-fade */
 .stage-img {
   position: absolute;
   inset: 0;
@@ -51,25 +48,10 @@ body.cursor-hidden { cursor: none; }
   opacity: 0;
   z-index: 1;
 }
+.stage-img.active { display: block; opacity: 1; z-index: 2; }
+.stage-img.enter  { display: block; z-index: 3; }
+.stage-img.exit   { display: block; opacity: 0; z-index: 2; }
 
-.stage-img.active {
-  display: block;
-  opacity: 1;
-  z-index: 2;
-}
-
-.stage-img.enter {
-  display: block;
-  z-index: 3;
-}
-
-.stage-img.exit {
-  display: block;
-  opacity: 0;
-  z-index: 2;
-}
-
-/* --- Empty state --- */
 #empty-state {
   display: flex;
   flex-direction: column;
@@ -79,121 +61,102 @@ body.cursor-hidden { cursor: none; }
   text-align: center;
   z-index: 10;
 }
-
 .empty-icon { font-size: 72px; }
-
-#empty-state p {
-  font-size: 15px;
-  line-height: 1.7;
-  color: #555;
-}
-
+#empty-state p { font-size: 15px; line-height: 1.7; color: #555; }
 #btn-open {
-  padding: 10px 28px;
-  font-size: 15px;
-  background: #1e1e1e;
-  color: #ccc;
-  border: 1px solid #333;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  padding: 10px 28px; font-size: 15px;
+  background: #1e1e1e; color: #ccc;
+  border: 1px solid #333; border-radius: 8px;
+  cursor: pointer; transition: background 0.2s, border-color 0.2s;
 }
-#btn-open:hover {
-  background: #2a2a2a;
-  border-color: #555;
-}
+#btn-open:hover { background: #2a2a2a; border-color: #555; }
 
 /* --- Controls --- */
 #controls {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
+  bottom: 0; left: 0; right: 0;
+  display: flex; align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
   background: linear-gradient(transparent, rgba(0,0,0,0.9));
-  opacity: 0;
-  transform: translateY(10px);
+  opacity: 0; transform: translateY(10px);
   transition: opacity 0.2s ease, transform 0.2s ease;
-  pointer-events: none;
-  z-index: 100;
+  pointer-events: none; z-index: 100;
+}
+#controls.visible { opacity: 1; transform: translateY(0); pointer-events: all; }
+
+.controls-left, .controls-center, .controls-right {
+  display: flex; align-items: center; gap: 8px;
 }
 
-#controls.visible {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: all;
-}
-
-.controls-left,
-.controls-center,
-.controls-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* Кнопки */
 #controls button {
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.12);
-  color: #ddd;
-  border-radius: 6px;
-  padding: 6px 13px;
-  font-size: 15px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  color: #ddd; border-radius: 6px;
+  padding: 6px 13px; font-size: 15px;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s;
   line-height: 1;
 }
 #controls button:hover  { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.25); }
 #controls button.active { background: rgba(255,255,255,0.28); border-color: rgba(255,255,255,0.4); color: #fff; }
 
-/* Счётчик / имя */
+/* Кнопка выхода — красноватый оттенок при наведении */
+#btn-quit:hover { background: rgba(255,60,60,0.25); border-color: rgba(255,60,60,0.4); }
+
 #img-counter {
-  font-size: 12px;
-  color: #999;
-  min-width: 56px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
+  font-size: 12px; color: #999; min-width: 56px;
+  text-align: center; font-variant-numeric: tabular-nums;
 }
 #img-name {
-  font-size: 12px;
-  color: #666;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px; color: #666; max-width: 280px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* Интервал */
-.interval-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #aaa;
-}
-
+.interval-label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #aaa; }
 #interval-input {
-  width: 46px;
-  padding: 3px 6px;
+  width: 46px; padding: 3px 6px;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 4px;
-  color: #ddd;
-  font-size: 12px;
-  text-align: center;
-  cursor: text;
+  border-radius: 4px; color: #ddd; font-size: 12px;
+  text-align: center; cursor: text;
 }
-#interval-input:focus {
-  outline: none;
-  border-color: rgba(255,255,255,0.4);
+#interval-input:focus { outline: none; border-color: rgba(255,255,255,0.4); }
+#interval-slider { width: 80px; accent-color: #aaa; cursor: pointer; }
+
+/* --- Меню эффектов --- */
+#effects-menu {
+  position: fixed;
+  bottom: 70px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(20,20,20,0.95);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  padding: 6px;
+  opacity: 0;
+  transform: translateY(10px) scale(0.95);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  z-index: 200;
+}
+#effects-menu.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: all;
 }
 
-#interval-slider {
-  width: 80px;
-  accent-color: #aaa;
+.effect-opt {
+  all: unset;
+  display: block;
+  padding: 8px 18px;
+  font-size: 13px;
+  color: #ccc;
+  border-radius: 6px;
   cursor: pointer;
+  transition: background 0.1s;
+  text-align: left;
 }
+.effect-opt:hover { background: rgba(255,255,255,0.1); }
+.effect-opt.active { background: rgba(255,255,255,0.15); color: #fff; font-weight: 600; }

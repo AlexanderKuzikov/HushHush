@@ -30,20 +30,37 @@ var supportedFormats = map[string]bool{
 	".avif": true,
 }
 
+// Эффекты переходов
+const (
+	EffectFade     = "fade"
+	EffectKenBurns = "kenburns"
+	EffectZoom     = "zoom"
+	EffectBlur     = "blur"
+)
+
+var EffectNames = []string{EffectFade, EffectKenBurns, EffectZoom, EffectBlur}
+
+// EffectsConfig — настройки визуальных эффектов
+type EffectsConfig struct {
+	Transition string `json:"transition"` // fade, kenburns, zoom, blur
+	KenBurns   bool   `json:"kenBurns"`   // медленный zoom во время показа
+}
+
 // Config — настройки приложения, сохраняются в %APPDATA%/HushHush/config.json
 type Config struct {
-	LastFolder string `json:"lastFolder"`
-	Interval   int    `json:"interval"` // секунды между кадрами
-	Shuffle    bool   `json:"shuffle"`
-	Loop       bool   `json:"loop"`
+	LastFolder string       `json:"lastFolder"`
+	Interval   int          `json:"interval"`
+	Shuffle    bool         `json:"shuffle"`
+	Loop       bool         `json:"loop"`
+	Effects    EffectsConfig `json:"effects"`
 }
 
 // ImageData — данные изображения для отображения
 type ImageData struct {
-	Data        string `json:"data"`        // data URI (base64)
-	Orientation int    `json:"orientation"` // EXIF ориентация (1-8)
-	Width       int    `json:"width"`       // ширина в пикселях
-	Height      int    `json:"height"`      // высота в пикселях
+	Data        string `json:"data"`
+	Orientation int    `json:"orientation"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
 }
 
 // App — основная структура приложения
@@ -54,7 +71,7 @@ type App struct {
 	preloader  *Preloader
 }
 
-// NewApp создаёт экземпляр приложения с настройками по умолчанию
+// NewApp создаёт экземпляр приложения
 func NewApp() *App {
 	configDir, _ := os.UserConfigDir()
 	configPath := filepath.Join(configDir, "HushHush", "config.json")
@@ -65,6 +82,10 @@ func NewApp() *App {
 			Interval: 5,
 			Shuffle:  false,
 			Loop:     true,
+			Effects: EffectsConfig{
+				Transition: EffectKenBurns,
+				KenBurns:   true,
+			},
 		},
 	}
 	app.loadConfig()
@@ -85,7 +106,6 @@ func (a *App) shutdown(ctx context.Context) {
 
 // --- Работа с папкой ---
 
-// OpenFolderDialog открывает системный диалог выбора папки
 func (a *App) OpenFolderDialog() string {
 	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:                "Выберите папку с изображениями",
@@ -100,7 +120,6 @@ func (a *App) OpenFolderDialog() string {
 	return folder
 }
 
-// GetImages возвращает список путей к изображениям в папке
 func (a *App) GetImages(folder string) []string {
 	if folder == "" {
 		folder = a.config.LastFolder
@@ -108,12 +127,10 @@ func (a *App) GetImages(folder string) []string {
 	if folder == "" {
 		return nil
 	}
-
 	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return nil
 	}
-
 	var images []string
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -124,12 +141,10 @@ func (a *App) GetImages(folder string) []string {
 			images = append(images, filepath.Join(folder, entry.Name()))
 		}
 	}
-
 	sort.Strings(images)
 	return images
 }
 
-// GetLastFolder возвращает последнюю открытую папку
 func (a *App) GetLastFolder() string {
 	return a.config.LastFolder
 }
@@ -161,6 +176,26 @@ func (a *App) SetLoop(enabled bool) {
 	a.saveConfig()
 }
 
+func (a *App) SetTransition(name string) {
+	found := false
+	for _, n := range EffectNames {
+		if n == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	a.config.Effects.Transition = name
+	a.saveConfig()
+}
+
+func (a *App) SetKenBurns(enabled bool) {
+	a.config.Effects.KenBurns = enabled
+	a.saveConfig()
+}
+
 // --- Предзагрузка ---
 
 func (a *App) PreloadImages(paths []string) {
@@ -171,14 +206,10 @@ func (a *App) PreloadImages(paths []string) {
 
 // --- Работа с изображениями ---
 
-// decodeImageConfig определяет размеры изображения через image.DecodeConfig
-// Требует blank-import форматов (jpeg, png, gif, webp)
 func decodeImageConfig(data []byte, ext string) (width, height int) {
-	// AVIF не поддерживается — пропускаем
 	if strings.ToLower(ext) == ".avif" {
 		return 0, 0
 	}
-
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return 0, 0
@@ -186,14 +217,11 @@ func decodeImageConfig(data []byte, ext string) (width, height int) {
 	return cfg.Width, cfg.Height
 }
 
-// GetImageData читает изображение, определяет EXIF-ориентацию,
-// размеры и возвращает data URI (base64)
 func (a *App) GetImageData(path string) ImageData {
 	result := ImageData{Data: "", Orientation: 1}
 	if path == "" {
 		return result
 	}
-
 	data := a.preloader.Get(path)
 	if data == nil {
 		var err error
@@ -202,25 +230,18 @@ func (a *App) GetImageData(path string) ImageData {
 			return result
 		}
 	}
-
 	mimeType := mime.TypeByExtension(filepath.Ext(path))
 	if mimeType == "" {
 		mimeType = "image/jpeg"
 	}
-
 	result.Data = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 	result.Orientation = readExifOrientation(path)
-
-	// Определяем размеры
 	w, h := decodeImageConfig(data, filepath.Ext(path))
 	result.Width = w
 	result.Height = h
-
-	// Если EXIF поворот 90/270 — меняем W/H местами
 	if result.Orientation == 6 || result.Orientation == 8 {
 		result.Width, result.Height = h, w
 	}
-
 	return result
 }
 
@@ -236,6 +257,15 @@ func (a *App) loadConfig() {
 		return
 	}
 	_ = json.Unmarshal(data, &a.config)
+	// Валидация переходов
+	for _, n := range EffectNames {
+		if n == a.config.Effects.Transition {
+			// ок
+			return
+		}
+	}
+	// Если невалидный — сброс
+	a.config.Effects.Transition = EffectKenBurns
 }
 
 func (a *App) saveConfig() {

@@ -8,15 +8,10 @@
 </head>
 <body>
 
-  <!-- Область показа изображения -->
   <div id="stage">
-    <!-- Размытый фон (вместо чёрных полей) -->
     <div id="stage-bg"></div>
-
-    <!-- Два слоя для cross-fade -->
     <img id="img-front" class="stage-img" src="" alt="" draggable="false" />
     <img id="img-back" class="stage-img" src="" alt="" draggable="false" />
-    
     <div id="empty-state">
       <div class="empty-icon">🖼️</div>
       <p>Перетащите папку сюда<br>или нажмите кнопку ниже</p>
@@ -24,7 +19,6 @@
     </div>
   </div>
 
-  <!-- Панель управления (скрыта по умолчанию) -->
   <div id="controls">
     <div class="controls-left">
       <button id="btn-prev" title="Назад [←]">&#9664;</button>
@@ -38,7 +32,6 @@
     </div>
 
     <div class="controls-right">
-      <!-- Интервал -->
       <label class="interval-label">
         <span>⏱</span>
         <input type="number" id="interval-input" min="1" max="3600" value="5" title="Интервал (сек)" />
@@ -46,15 +39,23 @@
       </label>
       <input type="range" id="interval-slider" min="1" max="60" value="5" title="Интервал смены кадра" />
 
-      <!-- Shuffle -->
       <button id="btn-shuffle" title="Случайный порядок [S]">🔀</button>
-
-      <!-- Fullscreen -->
       <button id="btn-fullscreen" title="Полный экран [F]">⛶</button>
 
-      <!-- Открыть папку -->
-      <button id="btn-folder" title="Открыть папку">📁</button>
+      <!-- Кнопка настроек эффектов -->
+      <button id="btn-effects" title="Эффекты">✨</button>
+
+      <!-- Кнопка выхода -->
+      <button id="btn-quit" title="Выход">✕</button>
     </div>
+  </div>
+
+  <!-- Подменю выбора эффекта -->
+  <div id="effects-menu">
+    <button class="effect-opt" data-effect="fade">Fade</button>
+    <button class="effect-opt" data-effect="kenburns">Ken Burns</button>
+    <button class="effect-opt" data-effect="zoom">Zoom</button>
+    <button class="effect-opt" data-effect="blur">Blur</button>
   </div>
 
   <script type="module" src="./src/main.js"></script>

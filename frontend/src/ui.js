@@ -1,6 +1,10 @@
-import { WindowFullscreen, WindowUnfullscreen, WindowIsFullscreen } from '../wailsjs/runtime/runtime.js'
+import {
+  WindowFullscreen, WindowUnfullscreen, WindowIsFullscreen,
+  Quit
+} from '../wailsjs/runtime/runtime.js'
+import { SetTransition, SetKenBurns } from '../wailsjs/go/main/App.js'
 
-// Маппинг EXIF-ориентации на CSS-трансформации
+// EXIF-ориентация
 const ORIENTATION_MAP = {
   1: { rotate: 0,       scaleX: 1, scaleY: 1 },
   2: { rotate: 0,       scaleX: -1, scaleY: 1 },
@@ -11,19 +15,15 @@ const ORIENTATION_MAP = {
   7: { rotate: -90,     scaleX: -1, scaleY: 1 },
   8: { rotate: -90,     scaleX: 1, scaleY: 1 },
 }
-
 function orientationCSS(orientation) {
   const t = ORIENTATION_MAP[orientation] || ORIENTATION_MAP[1]
   return `rotate(${t.rotate}deg) scale(${t.scaleX}, ${t.scaleY})`
 }
 
-// Ken Burns: случайное начальное смещение
-function randomKenBurnsOrigin() {
-  const positions = [
-    '50% 50%', '30% 30%', '70% 30%', '30% 70%',
-    '70% 70%', '50% 20%', '50% 80%', '20% 50%', '80% 50%',
-  ]
-  return positions[Math.floor(Math.random() * positions.length)]
+// Ken Burns random origin
+function randomKBOrigin() {
+  const pos = ['50% 50%','30% 30%','70% 30%','30% 70%','70% 70%','50% 20%','50% 80%','20% 50%','80% 50%']
+  return pos[Math.floor(Math.random() * pos.length)]
 }
 
 export class UI {
@@ -37,13 +37,33 @@ export class UI {
     this.nameEl    = document.getElementById('img-name')
     this.btnPlay   = document.getElementById('btn-play')
     this.btnShuffle = document.getElementById('btn-shuffle')
+    this.btnEffects = document.getElementById('btn-effects')
+    this.effectsMenu = document.getElementById('effects-menu')
     this.intervalInput  = document.getElementById('interval-input')
     this.intervalSlider = document.getElementById('interval-slider')
 
     this._visible = false
     this._activeImg = this.imgFront
     this._currentDuration = 5
+    this._effectsVisible = false
+
+    // Настройки эффектов (из конфига)
+    this.effects = {
+      transition: 'kenburns', // fade | kenburns | zoom | blur
+      kenBurns: true,
+    }
+
     this._bindToggle()
+    this._bindEffects()
+  }
+
+  // Загрузить настройки из конфига
+  applyConfig(config) {
+    if (config.effects) {
+      this.effects.transition = config.effects.transition || 'kenburns'
+      this.effects.kenBurns = config.effects.kenBurns !== false
+    }
+    this._highlightEffect()
   }
 
   setDuration(seconds) {
@@ -55,57 +75,111 @@ export class UI {
     const dur = Math.max(duration || this._currentDuration, 1)
     this._currentDuration = dur
 
-    // Определяем ориентацию изображения и экрана
+    // Определяем ориентацию для cover/contain
     const imgLandscape = width > 0 && height > 0 ? width > height : null
-    const screenLandscape = window.innerWidth > window.innerHeight
-
-    // Если размеры известны и ориентации совпадают — cover, иначе contain + blur
-    const useCover = imgLandscape !== null && imgLandscape === screenLandscape
+    const scrLandscape = window.innerWidth > window.innerHeight
+    const useCover = imgLandscape !== null && imgLandscape === scrLandscape
     const objectFit = useCover ? 'cover' : 'contain'
 
-    // Какой слой будет задним
-    const backImg = this._activeImg === this.imgFront ? this.imgBack : this.imgFront
+    // Какой слой будет новым
+    const newImg = this._activeImg === this.imgFront ? this.imgBack : this.imgFront
+    const oldImg = this._activeImg
 
-    // === Сброс backImg ===
-    backImg.style.transition = 'none'
-    backImg.style.opacity = '1'
-    backImg.style.display = 'block'
+    // Сброс нового слоя
+    newImg.style.transition = 'none'
+    newImg.style.opacity = '1'
+    newImg.style.display = 'block'
+    newImg.style.objectFit = objectFit
+    newImg.style.filter = 'none'
 
-    // Применяем object-fit
-    backImg.style.objectFit = objectFit
-
-    // Устанавливаем transform для EXIF-ориентации и Ken Burns
+    // EXIF-трансформация
     const orient = orientationCSS(orientation || 1)
-    const origin = randomKenBurnsOrigin()
-    backImg.style.transformOrigin = origin
-    backImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
+    const origin = randomKBOrigin()
+    newImg.style.transformOrigin = origin
 
-    void backImg.offsetHeight
+    // Начальное состояние в зависимости от типа перехода
+    let startTransform, endTransform, transitionProps
+    const baseEnd = `${orient} scale(1.0) translate(0, 0)`
+    const { transition, kenBurns } = this.effects
 
-    // Загружаем новое изображение
-    backImg.src = dataUri
+    switch (transition) {
+      case 'fade':
+        // Только cross-fade, без zoom
+        startTransform = orient
+        transitionProps = `opacity 0.6s ease`
+        break
 
-    // Классы
-    backImg.classList.remove('exit')
-    backImg.classList.add('active', 'enter')
+      case 'zoom':
+        // Zoom-in при входе: scale(0.92) → scale(1.0) за 0.5s
+        newImg.style.transform = `${orient} scale(0.92)`
+        void newImg.offsetHeight
+        startTransform = `${orient} scale(1.0)`
+        transitionProps = `transform 0.5s ease-out, opacity 0.6s ease`
+        break
 
-    // Ken Burns анимация
-    const zoomTarget = 1.06 + Math.random() * 0.04
-    const dx = (Math.random() - 0.5) * 2
-    const dy = (Math.random() - 0.5) * 2
-    backImg.style.transition = `transform ${dur}s linear, opacity 0.6s ease`
-    backImg.style.transform = `${orient} scale(${zoomTarget}) translate(${dx}%, ${dy}%)`
+      case 'blur':
+        // Blur-in: blur(6px) → none за 0.6s
+        newImg.style.filter = 'blur(6px)'
+        newImg.style.transform = orient
+        void newImg.offsetHeight
+        newImg.style.transform = orient
+        startTransform = orient
+        transitionProps = `filter 0.6s ease-out, opacity 0.6s ease`
+        break
 
-    // === Старый слой: fade out ===
-    this._activeImg.style.transition = `opacity 0.6s ease, transform 0.6s ease`
-    this._activeImg.classList.remove('active')
-    this._activeImg.classList.add('exit')
-    this._activeImg.style.opacity = '0'
+      default: // kenburns
+        newImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
+        void newImg.offsetHeight
+        startTransform = baseEnd
+        transitionProps = `opacity 0.6s ease`
+        break
+    }
 
-    // Меняем активный слой
-    this._activeImg = backImg
+    newImg.src = dataUri
+    newImg.classList.remove('exit')
+    newImg.classList.add('active', 'enter')
 
-    // === Размытый фон (только для contain) ===
+    // Применяем начальный transform
+    if (transition !== 'fade' && transition !== 'blur') {
+      newImg.style.transform = startTransform
+    }
+
+    // Запускаем Ken Burns (медленный zoom) если включён
+    if (kenBurns) {
+      const zoomTarget = 1.06 + Math.random() * 0.04
+      const dx = (Math.random() - 0.5) * 2
+      const dy = (Math.random() - 0.5) * 2
+      const kbEnd = `${orient} scale(${zoomTarget}) translate(${dx}%, ${dy}%)`
+
+      // Если transition уже задаёт transform через animation, комбинируем
+      if (transition === 'kenburns' || transition === 'fade') {
+        // Плавный переход от scale(1) к scale(target) за время показа
+        newImg.style.transition = `transform ${dur}s linear, opacity 0.6s ease`
+        newImg.style.transform = kbEnd
+      } else {
+        // После того как transition закончится (0.5-0.6s), запускаем Ken Burns
+        newImg.style.transition = `transform ${dur}s linear, opacity 0.6s ease, filter 0.6s ease`
+        setTimeout(() => {
+          newImg.style.transform = kbEnd
+        }, 600)
+      }
+    } else {
+      // Без Ken Burns — только transition (если есть)
+      if (transition !== 'fade') {
+        newImg.style.transition = transitionProps
+      }
+    }
+
+    // Старый слой: fade out
+    oldImg.style.transition = `opacity 0.6s ease, transform 0.6s ease`
+    oldImg.classList.remove('active')
+    oldImg.classList.add('exit')
+    oldImg.style.opacity = '0'
+
+    // Меняем активный
+    this._activeImg = newImg
+
+    // Размытый фон (только для contain)
     if (!useCover) {
       this.stageBg.style.backgroundImage = `url('${dataUri}')`
       this.stageBg.style.display = 'block'
@@ -113,10 +187,8 @@ export class UI {
       this.stageBg.style.display = 'none'
     }
 
-    // Сброс курсора
     document.body.classList.remove('cursor-hidden')
 
-    // Убираем временные классы
     setTimeout(() => {
       ;[this.imgFront, this.imgBack].forEach(img => {
         img.classList.remove('enter', 'exit')
@@ -178,6 +250,7 @@ export class UI {
     this._visible = false
     this.controls.classList.remove('visible')
     document.body.classList.remove('controls-visible')
+    this._hideEffects()
   }
 
   async toggleFullscreen() {
@@ -186,12 +259,64 @@ export class UI {
     else WindowFullscreen()
   }
 
+  // Кнопка выхода
+  quit() {
+    Quit()
+  }
+
+  // === Эффекты ===
+
+  _bindEffects() {
+    // Кнопка открытия меню
+    this.btnEffects.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this._effectsVisible ? this._hideEffects() : this._showEffects()
+    })
+
+    // Кнопки выбора эффекта
+    document.querySelectorAll('.effect-opt').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const effect = btn.dataset.effect
+        this.effects.transition = effect
+        SetTransition(effect)
+        this._highlightEffect()
+        this._hideEffects()
+      })
+    })
+  }
+
+  _showEffects() {
+    this._effectsVisible = true
+    this.effectsMenu.classList.add('visible')
+  }
+
+  _hideEffects() {
+    this._effectsVisible = false
+    this.effectsMenu.classList.remove('visible')
+  }
+
+  _highlightEffect() {
+    document.querySelectorAll('.effect-opt').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.effect === this.effects.transition)
+    })
+  }
+
+  // Клик вне меню — закрыть
   _bindToggle() {
     document.addEventListener('click', (e) => {
       const inControls = this.controls.contains(e.target)
       const inEmpty    = this.emptyState.contains(e.target)
+      const inEffects  = this.effectsMenu.contains(e.target)
+
+      if (inEffects) return // клик по меню не закрывает
+
       if (!inControls && !inEmpty) {
         this.toggleControls()
+      }
+
+      if (!this.btnEffects.contains(e.target)) {
+        this._hideEffects()
       }
     })
   }
