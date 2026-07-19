@@ -1,6 +1,6 @@
 # BUG REPORT — HushHush
 
-**Дата:** 2026-07-19  
+**Дата:** 2026-07-19 (обновлено: 2026-07-19 v2)  
 **Репозиторий:** [AlexanderKuzikov/HushHush](https://github.com/AlexanderKuzikov/HushHush)  
 
 ---
@@ -94,7 +94,7 @@ func (p *Preloader) Stop() {
     close(p.stopChan) // panic если вызвать дважды
 }
 ```
-Повторный вызов `Stop()` вызывает `panic: close of closed channel`. В текущем коде это возникает только при одном `shutdown()`, но это хрупко.
+Повторный вызов `Stop()` вызывает `panic: close of closed channel`.
 
 ### Фикс
 ```go
@@ -117,7 +117,7 @@ func (p *Preloader) Stop() {
 **Статус:** Open
 
 ### Описание
-При Ken Burns-эффекте запускается `setTimeout` с задержкой 700ms. Если пользователь нажимает `next` до истечения 700ms, double-buffer меняет слои местами. Когда `setTimeout` срабатывает, он применяет анимацию к уже новому изображению (которое стало `newImg` в следующем вызове), создавая визуальный артефакт — следующее фото «прыгает».
+При Ken Burns-эффекте запускается `setTimeout` с задержкой 700ms. Если пользователь нажимает `next` до истечения 700ms, double-buffer меняет слои местами. Когда `setTimeout` срабатывает, он применяет анимацию к уже новому изображению, создавая визуальный артефакт — следующее фото «прыгает».
 
 ### Воспроизведение
 1. Установить эффект Ken Burns
@@ -125,11 +125,9 @@ func (p *Preloader) Stop() {
 3. На некоторых изображениях будет видна резкая смена transform в начале
 
 ### Фикс
-Добавить счётчик поколений:
 ```javascript
-this._generation = 0
-// в setImage:
-const gen = ++this._generation
+this._generation = (this._generation || 0) + 1
+const gen = this._generation
 setTimeout(() => {
     if (this._generation !== gen) return // уже устарело
     newImg.style.transition = ...
@@ -186,10 +184,9 @@ if !strings.HasPrefix(cleanPath, cleanBase+string(filepath.Separator)) {
 ```go
 _ = json.Unmarshal(data, &a.config)
 ```
-При частично повреждённом JSON (например, файл был обрезан при записи) `Unmarshal` вернёт ошибку после частичной десериализации. Часть полей в `a.config` будет из файла, часть останется дефолтной. Возможны неочевидные баги поведения.
+При частично повреждённом JSON `Unmarshal` вернёт ошибку после частичной десериализации. Часть полей в `a.config` будет из файла, часть останется дефолтной.
 
 ### Фикс
-При ошибке десериализации — полностью сбрасывать к дефолтам:
 ```go
 var loaded Config
 if err := json.Unmarshal(data, &loaded); err == nil {
@@ -212,7 +209,7 @@ if result.Orientation == 6 || result.Orientation == 8 {
     result.Width, result.Height = h, w
 }
 ```
-Ориентации 5 и 7 (повёрнутые на 90° с зеркальным отражением) также требуют swap Width/Height, но код их не обрабатывает. `useCover` в `ui.js` будет вычислен неправильно для таких изображений.
+Ориентации 5 и 7 тоже требуют swap Width/Height, но код их не обрабатывает. `useCover` в `ui.js` будет вычислен неправильно.
 
 ### Фикс
 ```go
@@ -236,7 +233,7 @@ if (!inControls && !inEmpty) {
     this.toggleControls()
 }
 ```
-Клик по стартовому экрану (`emptyState`) явно исключён из условия `toggleControls()`. Пользователь, который уже открыл панель и закрыл её кликом, не может снова открыть её кликом по пустому экрану — нужно знать, что панель появляется только при клике на область **вне** emptyState и controls.
+Клик по стартовому экрану явно исключён из условия `toggleControls()`. Пользователь не может снова открыть панель кликом по пустому экрану.
 
 ### Фикс
 Убрать `!inEmpty` из условия, либо добавить отдельный обработчик клика на `emptyState`.
@@ -250,13 +247,196 @@ if (!inControls && !inEmpty) {
 **Статус:** Open
 
 ### Описание
-`frontend/package.json.md5` — служебный файл Wails, генерируется автоматически. Файлы `wailsjs/` генерируются командой `wails generate module`. Оба типа не должны коммититься.
+`frontend/package.json.md5` — служебный файл Wails, генерируется автоматически. Файлы `wailsjs/` также генерируются автоматически. Оба не должны коммититься.
 
 ### Фикс
-Добавить в `.gitignore`:
 ```
 frontend/package.json.md5
 frontend/wailsjs/
+```
+
+---
+
+## BUG-012 — ❌ НОВОЕ: `exif.go` не валидирует `dataType` тега Orientation
+
+**Severity:** 🟠 High  
+**Файл:** `exif.go`  
+**Статус:** Open
+
+### Описание
+По стандарту EXIF/TIFF тег `0x0112` (Orientation) имеет тип `SHORT` (dataType == 3). Код читает и дискардирует `dataType` без проверки:
+```go
+dataType := bo.Uint16(tiffHeader[entryOffset+2 : entryOffset+4])
+_ = dataType
+```
+Если повреждённый EXIF содержит тег 0x0112 с другим типом данных, код прочитает неверное значение ориентации.
+
+### Фикс
+```go
+dataType := bo.Uint16(tiffHeader[entryOffset+2 : entryOffset+4])
+if dataType != 3 { // 3 = SHORT в TIFF
+    break
+}
+```
+
+---
+
+## BUG-013 — ❌ НОВОЕ: Множественные `setTimeout(800ms)` при быстром переключении удаляют классы активной анимации
+
+**Severity:** 🟠 High  
+**Файл:** `frontend/src/ui.js`, метод `setImage()`  
+**Статус:** Open
+
+### Описание
+```javascript
+setTimeout(() => {
+    ;[this.imgFront, this.imgBack].forEach(img => {
+        img.classList.remove('enter', 'exit')
+    })
+}, 800)
+```
+Каждый вызов `setImage()` создаёт новый `setTimeout(800ms)`. При быстром переключении (каждые 200–500ms) создаётся 4–5 таймаутов, которые сработают почти одновременно и удалят классы с текущего активного `newImg`, прерывая его анимацию входа.
+
+### Воспроизведение
+1. Быстро нажимать `→` 5 раз за 2 секунды
+2. На последнем изображении анимация появления резко обрывается
+
+### Фикс
+Хранить ID таймаута очистки и сбрасывать его:
+```javascript
+clearTimeout(this._cleanupTimer)
+this._cleanupTimer = setTimeout(() => {
+    ;[this.imgFront, this.imgBack].forEach(img => {
+        img.classList.remove('enter', 'exit')
+    })
+}, 800)
+```
+
+---
+
+## BUG-014 — ❌ НОВОЕ: Запись конфига на диск 60+ раз в секунду при движении слайдера
+
+**Severity:** 🟡 Medium  
+**Файл:** `frontend/src/slider.js`, метод `bindEvents()`  
+**Статус:** Open
+
+### Описание
+```javascript
+intervalSlider.addEventListener('input', (e) => {
+    const v = parseInt(e.target.value)
+    intervalInput.value = v
+    this.setInterval(v) // → SetInterval(v) → saveConfig() → os.WriteFile()
+})
+```
+Событие `input` на range-слайдере стреляет при каждом движении мыши. Каждый вызов проходит цепочку JS → Go IPC → `saveConfig()` → запись на диск. При быстром перетаскивании это 30–60 записей/сек — избыточная нагрузка на I/O и IPC.
+
+### Фикс
+Добавить debounce с задержкой 300ms:
+```javascript
+let debounceTimer
+intervalSlider.addEventListener('input', (e) => {
+    const v = parseInt(e.target.value)
+    intervalInput.value = v
+    this.interval = v
+    this.ui.setDuration(v)
+    clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => this.setInterval(v), 300)
+})
+```
+
+---
+
+## BUG-015 — ❌ НОВОЕ: Отсутствует Content-Security-Policy — XSS может вызвать Go API
+
+**Severity:** 🔴 Critical  
+**Файл:** `frontend/index.html`  
+**Статус:** Open
+
+### Описание
+Wails v2 предоставляет JS-доступ к Go-методам через `window.go.*`. Без CSP любой инъецированный JS (например, через уязвимость в обработке имён файлов с HTML-символами) может:
+- Вызвать `GetImageData()` с произвольным путём
+- Вызвать `OpenFolderDialog()` без взаимодействия пользователя
+- В теории — добраться до чувствительных файлов ОС
+
+### Воспроизведение
+Теоретическая атака: файл с именем `<img src=x onerror="GetImageData('/etc/passwd')">` в папке, отображаемый через `setName()`.
+
+> **Примечание:** `setName()` использует `textContent`, а не `innerHTML`, поэтому данная конкретная атака не работает. Но CSP остаётся важной защитой in depth.
+
+### Фикс
+```html
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+```
+
+---
+
+## BUG-016 — ❌ НОВОЕ: `showStage()` не сбрасывает состояние `imgBack`
+
+**Severity:** 🟡 Medium  
+**Файл:** `frontend/src/ui.js`, метод `showStage()`  
+**Статус:** Open
+
+### Описание
+При смене папки вызывается `showStage()`, который сбрасывает только `imgFront`. `imgBack` содержит старое изображение, старые inline-стили и классы от предыдущей сессии. Первый переход после смены папки может дать неожиданный visual artifact.
+
+### Фикс
+```javascript
+showStage() {
+    this.emptyState.style.display = 'none'
+    // Сброс обоих буферов
+    ;[this.imgFront, this.imgBack].forEach(img => {
+        img.src = ''
+        img.style.cssText = ''
+        img.className = ''
+    })
+    this.imgFront.style.display = 'block'
+    this.imgFront.style.opacity = '1'
+    this.imgFront.style.transform = orientationCSS(1) + ' scale(1.0)'
+    this.imgFront.classList.add('active')
+    this._activeImg = this.imgFront
+}
+```
+
+---
+
+## BUG-017 — ❌ НОВОЕ: `#stage-bg` blur выходит за границы (overflow не ограничен)
+
+**Severity:** 🟢 Low  
+**Файл:** `frontend/src/styles.css`  
+**Статус:** Open
+
+### Описание
+Элемент `#stage-bg` имеет CSS `filter: blur()`, но родительский контейнер `#stage` не имеет `overflow: hidden`. Размытие «вытекает» за границы элемента, создавая полупрозрачные артефакты по краям экрана, особенно заметные на изображениях с контрастным фоном.
+
+### Фикс
+Добавить в CSS:
+```css
+#stage {
+    overflow: hidden;
+}
+```
+
+---
+
+## BUG-018 — ❌ НОВОЕ: Нет обработки потери видимости окна (Page Visibility API)
+
+**Severity:** 🟢 Low  
+**Файл:** `frontend/src/slider.js`  
+**Статус:** Open
+
+### Описание
+Когда окно Wails сворачивается, слайдшоу продолжает работать: таймеры тикают, `GetImageData()` читает файлы и кодирует их в base64, `PreloadImages()` загружает следующие изображения — всё это впустую расходует CPU и I/O.
+
+### Фикс
+```javascript
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        clearTimeout(this.timer)
+    } else if (this.playing) {
+        this.scheduleNext()
+    }
+})
 ```
 
 ---
@@ -268,11 +448,18 @@ frontend/wailsjs/
 | BUG-001 | 🔴 Critical | `exif.go` | EXIF ориентация сломана для Big Endian (Canon, Nikon, DJI) |
 | BUG-002 | 🔴 Critical | `slider.js` | Drag & Drop не работает в Wails — `fullPath` невалиден |
 | BUG-003 | 🔴 Critical | `preloader.go` | Утечка памяти — кэш не ограничен |
+| BUG-015 | 🔴 Critical | `index.html` | Отсутствует CSP — уязвимость в глубину |
 | BUG-004 | 🟠 High | `preloader.go` | Double-Stop() → panic |
 | BUG-005 | 🟠 High | `ui.js` | Ken Burns ghost-анимация при быстром переключении |
 | BUG-006 | 🟠 High | `app.go`+`exif.go` | Двойное чтение файла при каждом изображении |
 | BUG-007 | 🟠 High | `app.go` | Path traversal в GetImageData |
+| BUG-012 | 🟠 High | `exif.go` | dataType тега Orientation не валидируется |
+| BUG-013 | 🟠 High | `ui.js` | Множественные setTimeout(800ms) обрывают анимацию |
 | BUG-008 | 🟡 Medium | `app.go` | Повреждённый config → смешанное состояние |
 | BUG-009 | 🟡 Medium | `app.go` | Swap W/H не для ориентаций 5 и 7 |
 | BUG-010 | 🟡 Medium | `ui.js` | Клик по empty-state не показывает controls |
+| BUG-014 | 🟡 Medium | `slider.js` | 60+ записей/сек на диск при движении слайдера |
+| BUG-016 | 🟡 Medium | `ui.js` | showStage() не сбрасывает imgBack |
 | BUG-011 | 🟢 Low | `.gitignore` | Служебные файлы Wails в репозитории |
+| BUG-017 | 🟢 Low | `styles.css` | #stage-bg blur за пределами экрана |
+| BUG-018 | 🟢 Low | `slider.js` | Нет обработки Page Visibility API |

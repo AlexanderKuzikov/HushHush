@@ -1,7 +1,7 @@
 # CODE REVIEW — HushHush
 
-**Дата:** 2026-07-19  
-**Ревьюер:** Perplexity AI (claude-sonnet-4-5)  
+**Дата:** 2026-07-19 (обновлено: 2026-07-19 v2)  
+**Ревьюер:** Perplexity AI (claude-sonnet-4-5 → claude-sonnet-4-6)  
 **Репозиторий:** [AlexanderKuzikov/HushHush](https://github.com/AlexanderKuzikov/HushHush)  
 **Стек:** Go + Wails v2 + Vanilla JS (Vite)
 
@@ -11,7 +11,7 @@
 
 Проект — десктопный слайдер на Wails v2. Код **читаемый**, архитектура **понятная**. Однако при детальном разборе выявляется ряд серьёзных проблем: утечки памяти, race conditions, багованный EXIF-парсер, Drag & Drop не работает в Wails окружении, отсутствие тестов и error handling в критических местах.
 
-**Общая оценка: 6/10**
+**Общая оценка: 6/10** → после фикса критических багов: потенциально 8/10
 
 ---
 
@@ -22,6 +22,7 @@
 - Валидация `SetTransition` через `EffectNames` — правильно.
 - Дефолтная конфигурация задаётся в `NewApp()` — правильно.
 - `saveConfig()` создаёт директорию через `MkdirAll` — правильно.
+- `SetTransition` использует линейный поиск по `EffectNames` вместо map — для 4 элементов нормально, но при расширении стоит перейти к `map[string]bool`.
 
 ### ❌ Критично
 
@@ -85,6 +86,14 @@ if result.Orientation == 6 || result.Orientation == 8 {
 ```
 Ориентации 5 и 7 (повёрнутые + зеркальные) тоже требуют swap Width/Height, но здесь не обрабатываются.
 
+**8. `GetConfig()` возвращает копию Config по значению — нет защиты от изменений**
+```go
+func (a *App) GetConfig() Config {
+    return a.config
+}
+```
+Это нормально для Go (возврат по значению безопасен), но если `Config` в будущем получит поля со слайсами/mapами — копия станет shallow и мутация со стороны фронтенда будет изменять внутреннее состояние. Стоит держать это в уме.
+
 ---
 
 ## `exif.go`
@@ -123,16 +132,35 @@ if marker == 0xD9 {
 }
 ```
 
-**3. Чтение 65KB в стек — проблема для больших файлов**
+**3. Чтение 65KB в буфер — может не захватить APP1 в некоторых файлах**
 ```go
 buf := make([]byte, 65536)
 ```
-Для большинства файлов EXIF данные находятся в первых 64KB, но если APP0 (JFIF) очень большой, APP1 может выйти за пределы буфера и не будет найден. Надёжнее читать только заголовки секций и переходить к нужной.
+Для большинства файлов EXIF данные находятся в первых 64KB, но если APP0 (JFIF thumbnail) очень большой, APP1 может выйти за пределы буфера и не будет найден.
 
 **4. Функция читает файл заново, хотя данные уже в `preloader.cache`**
 В `GetImageData` данные файла уже загружены через `preloader.Get(path)`, но затем вызывается `readExifOrientation(path)`, который открывает файл ещё раз с диска. Двойной I/O на каждое изображение.
 
 **Фикс:** передавать `[]byte` в `readExifOrientation` вместо `path`.
+
+**5. ❌ НОВОЕ: `dataType` считывается но немедленно дискардится**
+```go
+dataType := bo.Uint16(tiffHeader[entryOffset+2 : entryOffset+4])
+_ = dataType // Для orientation значение хранится прямо в поле value
+```
+По стандарту EXIF/TIFF тег `0x0112` (Orientation) ДОЛЖЕН иметь тип `SHORT` (dataType == 3). Код не валидирует это. Если файл содержит повреждённый EXIF, где тег 0x0112 имеет другой тип (например, LONG=4 или RATIONAL=5), код всё равно попытается прочитать 2 байта как SHORT и вернёт мусорное значение.
+
+**Фикс:**
+```go
+dataType := bo.Uint16(tiffHeader[entryOffset+2 : entryOffset+4])
+if dataType != 3 { // 3 = SHORT
+    pos += 2 + length
+    continue
+}
+```
+
+**6. ❌ НОВОЕ: Нет проверки `count` поля IFD-записи**
+Каждая IFD-запись содержит поле `count` (количество значений). Для Orientation count всегда должен быть 1. Код не читает и не проверяет это поле — при повреждённых данных можно прочитать за пределы допустимого.
 
 ---
 
@@ -165,18 +193,27 @@ func (p *Preloader) Stop() {
     close(p.stopChan) // panic если вызвать дважды
 }
 ```
-Повторный вызов `Stop()` вызовет `panic: close of closed channel`. В `app.go` shutdown вызывается один раз, но это хрупко.
+Повторный вызов `Stop()` вызовет `panic: close of closed channel`.
 
 **Фикс:**
 ```go
 func (p *Preloader) Stop() {
     select {
-    case <-p.stopChan: // уже закрыт
+    case <-p.stopChan:
     default:
         close(p.stopChan)
     }
 }
 ```
+
+**5. ❌ НОВОЕ: `Preload()` не проверяет, что `stopChan` не закрыт перед отправкой в канал**
+```go
+case p.queue <- path:
+```
+Если `Stop()` уже вызван и воркеры завершились, канал `queue` пуст, но никто его не читает. `select { case p.queue <- path: default: }` не вызовет panic (буферизованный канал), но задачи в очереди не будут обработаны — тихая потеря. Более серьёзно: при `queue` capacity=32 и вызове `Preload` после `Stop()` с >32 путями произойдёт silent drop без диагностики.
+
+**6. ❌ НОВОЕ: Нет метрик / диагностики кэша**
+Нет возможности узнать текущий размер кэша в байтах, hit-rate, количество загруженных файлов. При дебаггинге утечки памяти это критично.
 
 ---
 
@@ -194,10 +231,16 @@ println("Ошибка запуска:", err.Error())
 ```go
 Width: 1280, Height: 800,
 ```
-На экранах с высоким DPI (4K, Retina через Wine/Parallels) окно будет маленьким. Wails v2 не масштабирует автоматически. Следует использовать `ZoomFactor` или читать размер экрана.
+На экранах с высоким DPI (4K, Retina через Wine/Parallels) окно будет маленьким.
 
 **3. `HideWindowOnClose: false` — окно не скрывается, а закрывается**
-При закрытии окна приложение полностью завершается. Это может быть намеренным, но для слайдера-скринсейвера типичнее сворачивание в трей.
+При закрытии окна приложение полностью завершается.
+
+**4. ❌ НОВОЕ: `StartHidden: false` — явно указывает не скрывать при старте**
+Это нормально, но для приложения-слайдера, которое может стартовать в последнем состоянии (fullscreen), стоит рассмотреть управление видимостью через `OnStartup`.
+
+**5. ❌ НОВОЕ: `Frameless: false` — без кастомного chrome**
+Для слайдер-приложения frameless режим с кастомным drag-регионом был бы более подходящим UX. Стандартный Windows chrome выглядит неуместно для медиа-приложения полного экрана.
 
 ---
 
@@ -208,21 +251,19 @@ Width: 1280, Height: 800,
 - `_changing` флаг предотвращает race condition при быстром клике.
 - `resetTimer()` корректно сбрасывает таймер при ручной навигации.
 - Предзагрузка следующих 3 изображений.
+- Разделение ответственности: `Slider` управляет логикой, `UI` — отображением.
+- `e.stopPropagation()` на всех кнопках — предотвращает всплытие к `_bindToggle`.
 
 ### ❌ Критично
 
 **1. Drag & Drop не работает в Wails**
 ```javascript
-document.addEventListener('drop', async (e) => {
-    const entry = item.webkitGetAsEntry()
-    if (entry?.isDirectory) await this.loadFolder(entry.fullPath)
-})
+const entry = item.webkitGetAsEntry()
+if (entry?.isDirectory) await this.loadFolder(entry.fullPath)
 ```
 `webkitGetAsEntry()` в Wails WebView возвращает виртуальный путь браузера, а не реальный путь файловой системы. `entry.fullPath` будет что-то вроде `/FolderName`, а не `C:\Users\...\FolderName`. `GetImages()` с таким путём вернёт пустой массив. **Функция фактически сломана.**
 
-**Фикс:** использовать Wails Runtime API для получения реального пути или убрать Drag & Drop из интерфейса до реализации.
-
-**2. `scheduleNext()` — двойной вызов при быстром next()**
+**2. `scheduleNext()` — потенциально двойной таймер**
 ```javascript
 scheduleNext() {
     clearTimeout(this.timer)
@@ -233,27 +274,14 @@ scheduleNext() {
     }, this.interval * 1000)
 }
 ```
-Если пользователь нажимает `next()` вручную, `resetTimer()` вызывает `scheduleNext()`. Но `next()` внутри таймаута также вызывает `scheduleNext()` в конце. При очень быстром взаимодействии возможно появление двух активных таймеров одновременно, если `clearTimeout` не успевает сработать до следующего tick. Безопаснее использовать `setInterval` или ID-based guard.
+Если `next()` вызывает `resetTimer()` → `scheduleNext()` до завершения текущего колбека таймаута, образуется два параллельных расписания.
 
-**3. Ошибка при потере фокуса `_changing = true` навсегда**
+**3. `buildShuffleOrder()` синтаксическая аномалия**
 ```javascript
-try {
-    const imgData = await GetImageData(path)
-    ...
-} finally {
-    this._changing = false
-}
+const j = Math.floor(Math.random() * (i + 1));[
+this.shuffleOrder[i], this.shuffleOrder[j]] = [this.shuffleOrder[j], this.shuffleOrder[i]]
 ```
-Если `GetImageData` завершится с исключением, `finally` сбросит `_changing = false` — это правильно. Но если JS-движок упадёт в `ui.setImage()` **после** `finally` — `_changing` уже `false`, а UI в неконсистентном состоянии. Нет восстановления после ошибки отображения.
-
-**4. `buildShuffleOrder()` синтаксическая странность**
-```javascript
-for (let i = this.shuffleOrder.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));[
-    this.shuffleOrder[i], this.shuffleOrder[j]] = [this.shuffleOrder[j], this.shuffleOrder[i]]
-}
-```
-Точка с запятой стоит **перед** `[`, что выглядит как конец выражения и начало нового array literal. Это работает только потому что деструктуризация читается как одно выражение через `;[...] = [...]`. Это крайне неочевидно и может сломаться при минификации или автоформатировании.
+Точка с запятой стоит **перед** `[`, что выглядит как конец выражения и начало нового array literal. Это работает только потому что деструктуризация читается как одно выражение через `;[...] = [...]`. Крайне неочевидно и может сломаться при минификации или автоформатировании.
 
 **Фикс:**
 ```javascript
@@ -261,12 +289,46 @@ const j = Math.floor(Math.random() * (i + 1));
 [this.shuffleOrder[i], this.shuffleOrder[j]] = [this.shuffleOrder[j], this.shuffleOrder[i]];
 ```
 
-**5. Нет обработки пустого результата `GetImages`**
+**4. Нет обработки пустого результата `GetImages` — UX-провал**
 ```javascript
-images = await GetImages(folder)
 if (!images || images.length === 0) return
 ```
-При возврате молча выходим без сообщения пользователю. Если папка содержит только видеофайлы или другие форматы — пользователь не поймёт почему ничего не загрузилось.
+При возврате молча выходим без сообщения пользователю. Пользователь не поймёт, почему ничего не загрузилось.
+
+**5. ❌ НОВОЕ: `prev()` не проверяет `_ready`**
+```javascript
+prev() {
+    if (this.images.length === 0 || this._changing) return
+    this.index = this.index > 0 ? this.index - 1 : this.images.length - 1
+    this.showCurrent()
+}
+```
+`prev()` (в отличие от `next()`) не использует флаг `this._ready`. Хотя `images.length === 0` и защищает, семантически стоит использовать единый флаг готовности.
+
+**6. ❌ НОВОЕ: `setInterval()` в `Slider` конфликтует с глобальным `window.setInterval`**
+```javascript
+setInterval(seconds) { ... }
+```
+Метод класса называется `setInterval` — точно как глобальная браузерная функция `window.setInterval`. Внутри класса коллизии нет (`this.setInterval` vs `window.setInterval`), но это ловушка для будущих разработчиков и порождает путаницу. Стоит переименовать в `setSlideInterval()` или `updateInterval()`.
+
+**7. ❌ НОВОЕ: Отсутствует обработка события потери видимости страницы**
+Если окно Wails сворачивается или перекрывается, слайдшоу продолжает работать, загружая изображения из файловой системы и делая base64-кодирование без надобности. Нет обработки `document.addEventListener('visibilitychange', ...)`.
+
+**8. ❌ НОВОЕ: `PreloadImages` вызывается без ожидания и ошибки игнорируются**
+```javascript
+PreloadImages(nextPaths).catch(() => {})
+```
+Ошибка полностью подавляется. Если preloader упал (например, Go-паника в другом потоке), фронтенд никогда об этом не узнает.
+
+**9. ❌ НОВОЕ: Нет debounce на `setInterval()` при изменении слайдера**
+```javascript
+intervalSlider.addEventListener('input', (e) => {
+    const v = parseInt(e.target.value)
+    intervalInput.value = v
+    this.setInterval(v) // вызывает SetInterval() → saveConfig() на каждый пиксель движения
+})
+```
+Событие `input` на range-слайдере стреляет при каждом движении мыши. Каждый раз вызывается `SetInterval(v)` → Go-метод → `saveConfig()` → запись на диск. При быстром перетаскивании слайдера это 30–60 записей в секунду.
 
 ---
 
@@ -276,6 +338,8 @@ if (!images || images.length === 0) return
 - `ORIENTATION_MAP` — чистая и полная таблица для всех 8 значений EXIF.
 - Double-buffering через `imgFront`/`imgBack` — грамотное решение для плавных переходов.
 - `freezeAnimation()` корректно фиксирует текущий transform через `getComputedStyle`.
+- Корректный импорт из `wailsjs/runtime/runtime.js` — не использует устаревший `window.runtime`.
+- Все эффекты (fade/zoom/blur/kenburns) реализованы через CSS transitions без сторонних библиотек.
 
 ### ❌ Проблемы
 
@@ -283,26 +347,34 @@ if (!images || images.length === 0) return
 ```javascript
 this.stageBg.style.backgroundImage = `url('${dataUri}')`
 ```
-`dataUri` — это полная base64-строка изображения (может быть 10–50MB для RAW-converted). Устанавливать её как CSS `background-image` означает, что браузер декодирует изображение **дважды**: один раз для `<img>`, второй раз для `background-image`. Двойное потребление памяти и двойной decode.
+`dataUri` — это полная base64-строка изображения (может быть 10–50MB). Устанавливать её как CSS `background-image` означает, что браузер декодирует изображение **дважды**: один раз для `<img>`, второй раз для `background-image`. Двойное потребление памяти и двойной decode.
 
-**Фикс:** создавать `<canvas>` с низким разрешением (например, 32×32) для blur-эффекта фона.
+**Фикс:** использовать `<canvas>` с низким разрешением (например, 32×32) для blur-эффекта фона или `URL.createObjectURL(blob)`.
 
 **2. `toggleFullscreen()` — fallback через `window.runtime` не работает в Wails v2**
 ```javascript
 try { window.runtime.WindowFullscreen() } catch (_) {}
 ```
-`window.runtime` в Wails v2 не существует. Правильный путь — только через импортированные функции из `wailsjs/runtime/runtime.js`. Этот fallback никогда не сработает, ошибка молча глотается.
+`window.runtime` в Wails v2 не существует. Правильный путь — только через импортированные функции из `wailsjs/runtime/runtime.js`. Этот fallback никогда не сработает.
 
-**3. Ken Burns применяется к `newImg`, но при быстром переключении старый `setTimeout` срабатывает на уже замененном слое**
+**3. Ken Burns ghost-анимация при быстром переключении**
 ```javascript
 setTimeout(() => {
     newImg.style.transition = `transform ${Math.max(dur, 2)}s linear ...`
     newImg.style.transform = kbEnd
 }, delay)
 ```
-Если пользователь нажал `next` до истечения `delay` (700ms), `newImg` уже стал `oldImg` (через double-buffer swap). `setTimeout` запустится и применит Ken Burns анимацию к уже скрытому слою, что вызовет ghost-анимацию на следующем изображении.
+Если пользователь нажал `next` до истечения `delay` (700ms), `newImg` уже стал `oldImg`. `setTimeout` запустится и применит Ken Burns анимацию к уже скрытому слою — ghost-анимация.
 
-**Фикс:** хранить cancellation token (например, инкрементный счётчик) и проверять его в `setTimeout`.
+**Фикс:**
+```javascript
+this._generation = (this._generation || 0) + 1
+const gen = this._generation
+setTimeout(() => {
+    if (this._generation !== gen) return
+    newImg.style.transition = ...
+}, delay)
+```
 
 **4. `_bindToggle()` — клик по `emptyState` не переключает контролы**
 ```javascript
@@ -310,13 +382,99 @@ if (!inControls && !inEmpty) {
     this.toggleControls()
 }
 ```
-Клик по пустому экрану (до загрузки папки) ничего не делает. Пользователь не может открыть панель управления кликом в начальном состоянии. Это UX-баг.
+Клик по пустому экрану (до загрузки папки) ничего не делает — UX-баг.
 
 **5. Нет debounce на `mousemove` для курсора**
 ```javascript
 document.addEventListener('mousemove', showCursor)
 ```
-`showCursor` вызывается на каждое событие `mousemove` — это может быть 100+ раз в секунду. Каждый раз вызывается `clearTimeout` и `setTimeout`. Производительность не катастрофическая, но это стандартная практика — добавить debounce.
+`showCursor` вызывается 60–120 раз в секунду при движении мыши. Стандартная практика — добавить throttle (requestAnimationFrame) или debounce.
+
+**6. ❌ НОВОЕ: `oldImg.style.opacity = '0'` — конфликт с CSS классом `exit`**
+```javascript
+oldImg.classList.add('exit')
+oldImg.style.opacity = '0'
+```
+Одновременно устанавливается CSS класс `exit` (который, судя по `styles.css`, тоже может задавать opacity) и inline style `opacity: '0'`. Inline style имеет более высокую специфичность и перезаписывает CSS-класс, делая класс `exit` бесполезным для opacity-анимации. Стоит убрать inline style и полностью делегировать анимацию CSS-классу.
+
+**7. ❌ НОВОЕ: `newImg.classList.remove('enter', 'exit')` вызывается через 800ms для обоих элементов**
+```javascript
+setTimeout(() => {
+    ;[this.imgFront, this.imgBack].forEach(img => {
+        img.classList.remove('enter', 'exit')
+    })
+}, 800)
+```
+Если в течение 800ms было запущено несколько переходов подряд, каждый создаёт свой `setTimeout(800ms)`. Все они сработают и удалят классы `enter`/`exit` у текущего `newImg`, прерывая его активную анимацию входа.
+
+**8. ❌ НОВОЕ: `showStage()` не сбрасывает `imgBack`**
+```javascript
+showStage() {
+    this.emptyState.style.display = 'none'
+    this.imgFront.style.display = 'block'
+    this.imgFront.style.opacity = '1'
+    ...
+}
+```
+`imgBack` не сбрасывается. Если `showStage()` вызывается повторно (например, после смены папки), `imgBack` может содержать старое изображение с устаревшими стилями.
+
+**9. ❌ НОВОЕ: В zoom-эффекте используется `void newImg.offsetHeight` для форс-reflow, но это вызов layout thrashing**
+```javascript
+void newImg.offsetHeight
+newImg.style.transition = `transform 0.6s ease-out...`
+newImg.style.transform = `${orient} scale(1.0) translate(0, 0)`
+```
+Для принудительного reflow лучше использовать `requestAnimationFrame(() => { ... })` — это запрашивает reflow через браузерный планировщик, а не блокирует основной поток.
+
+**10. ❌ НОВОЕ: Нет обработки ошибки `SetTransition`**
+```javascript
+try { await SetTransition(effect) } catch (_) {}
+```
+Ошибка полностью поглощается. Если Go-метод вернёт ошибку (например, невалидное имя эффекта), UI покажет выбранный эффект активным, но сервер его не применит — UI и backend рассинхронизированы.
+
+---
+
+## `frontend/src/styles.css`
+
+### ✅ Хорошо
+- Использование CSS custom properties (`--control-bg`, `--control-hover`) — хороший тон.
+- `will-change: transform, opacity` на img элементах — GPU-ускорение переходов.
+- `-webkit-app-region: drag` для перетаскивания окна — Wails-specific правильно применён.
+
+### ❌ Проблемы
+
+**1. ❌ НОВОЕ: `.exit` класс не задаёт собственный `transition`**
+Класс `exit` в CSS не содержит `transition` свойства, значит анимация исчезновения старого изображения полностью управляется inline styles из `ui.js`. Это антипаттерн: анимации должны быть в CSS, JS только управляет классами.
+
+**2. ❌ НОВОЕ: `#stage-bg` имеет `filter: blur()` но нет `overflow: hidden` на родителе**
+Размытый фон выходит за границы элемента. Если blur radius большой, артефакты видны по краям экрана. Нужен `overflow: hidden` на `#stage` или отрицательный `margin`.
+
+**3. ❌ НОВОЕ: `cursor: none` применяется глобально через `body.cursor-hidden`**
+Это скрывает курсор и в системных диалогах Wails (если они открыты поверх). Ограничить до `#stage` или `main`.
+
+---
+
+## `frontend/index.html`
+
+### ❌ Проблемы
+
+**1. ❌ НОВОЕ: Нет `<meta name="viewport">` для корректного масштабирования**
+Хотя приложение десктопное, отсутствие viewport meta может привести к неожиданному масштабированию WebView при изменении DPI.
+
+**2. ❌ НОВОЕ: Нет `<meta http-equiv="Content-Security-Policy">`**
+Для Wails-приложений CSP критически важен: без него XSS в WebView может выполнить произвольный Go-код через `window.go.*`. Минимальный CSP:
+```html
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+```
+
+---
+
+## `wails.json`
+
+### ❌ Проблемы
+
+**1. ❌ НОВОЕ: `wailsVersion` не зафиксирован**
+В `wails.json` нет явного указания минимальной версии Wails. Разные версии Wails v2 имеют breaking changes в runtime API. Зафиксировать в `go.mod` и `README`.
 
 ---
 
@@ -325,7 +483,7 @@ document.addEventListener('mousemove', showCursor)
 ### ❌ Проблемы
 
 **1. `frontend/package.json.md5` закоммичен в репозиторий**
-Это служебный файл Wails для отслеживания изменений зависимостей. Его не должно быть в git. Добавить в `.gitignore`.
+Это служебный файл Wails для отслеживания изменений зависимостей. Добавить в `.gitignore`.
 
 **2. `build/` директория — содержимое не проверено**
 Если в `build/` находятся скомпилированные бинарники — их не должно быть в git.
@@ -339,6 +497,12 @@ document.addEventListener('mousemove', showCursor)
 **5. `wailsjs/` директория должна быть в `.gitignore`**
 Файлы `wailsjs/go/main/App.js` и `wailsjs/runtime/runtime.js` генерируются автоматически командой `wails generate module`. Коммитить их — антипаттерн.
 
+**6. ❌ НОВОЕ: Нет `CHANGELOG.md`**
+Для десктопного приложения с binary releases отсутствие changelog затрудняет отслеживание изменений между версиями.
+
+**7. ❌ НОВОЕ: Нет `LICENSE` файла**
+Репозиторий публичный, но без лицензии — по умолчанию «все права защищены», что делает форки невозможными юридически.
+
 ---
 
 ## Приоритизация фиксов
@@ -348,12 +512,21 @@ document.addEventListener('mousemove', showCursor)
 | 🔴 CRITICAL | `exif.go` | Ориентация читается без ByteOrder → поломанный EXIF для Big Endian |
 | 🔴 CRITICAL | `preloader.go` | Утечка памяти — кэш неограничен, `Evict` нигде не вызывается |
 | 🔴 CRITICAL | `slider.js` | Drag & Drop сломан в Wails — `fullPath` невалиден |
+| 🔴 CRITICAL | `index.html` | Отсутствует CSP — XSS может вызвать Go код |
 | 🟠 HIGH | `exif.go` | Двойное чтение файла — данные уже в кэше preloader |
-| 🟠 HIGH | `app.go` | Path traversal в `GetImageData` — нет проверки что path внутри LastFolder |
+| 🟠 HIGH | `exif.go` | `dataType` не валидируется для тега Orientation |
+| 🟠 HIGH | `app.go` | Path traversal в `GetImageData` |
 | 🟠 HIGH | `ui.js` | Ken Burns ghost-анимация при быстром переключении |
+| 🟠 HIGH | `ui.js` | Множественные `setTimeout(800ms)` удаляют классы активной анимации |
 | 🟡 MEDIUM | `app.go` | Ошибки `loadConfig`/`saveConfig` молча игнорируются |
 | 🟡 MEDIUM | `preloader.go` | Double-`Stop()` вызовет panic |
+| 🟡 MEDIUM | `preloader.go` | `Preload()` не защищён от вызова после `Stop()` |
 | 🟡 MEDIUM | `ui.js` | `stageBg` декодирует base64 дважды — двойная память |
+| 🟡 MEDIUM | `slider.js` | `setInterval` конфликтует по имени с `window.setInterval` |
+| 🟡 MEDIUM | `slider.js` | Нет debounce при изменении слайдера интервала — 60 записей/сек на диск |
+| 🟡 MEDIUM | `styles.css` | `#stage-bg` без `overflow: hidden` — артефакты blur по краям |
 | 🟢 LOW | `main.go` | `println` вместо `log.Fatal` |
+| 🟢 LOW | `main.go` | `Frameless: false` — стандартный chrome неуместен для медиа-приложения |
 | 🟢 LOW | `slider.js` | Синтаксическая аномалия в `buildShuffleOrder` |
 | 🟢 LOW | `.gitignore` | `package.json.md5` и `wailsjs/` не исключены |
+| 🟢 LOW | repo root | Отсутствует `LICENSE` файл |
