@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"mime"
 	"os"
 	"path/filepath"
@@ -69,7 +72,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.preloader = NewPreloader(3) // предзагрузка 3 следующих кадров
+	a.preloader = NewPreloader(3)
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -96,7 +99,7 @@ func (a *App) OpenFolderDialog() string {
 	return folder
 }
 
-// GetImages возвращает список путей к изображениям в папке, отсортированных по имени
+// GetImages возвращает список путей к изображениям в папке
 func (a *App) GetImages(folder string) []string {
 	if folder == "" {
 		folder = a.config.LastFolder
@@ -132,12 +135,10 @@ func (a *App) GetLastFolder() string {
 
 // --- Настройки ---
 
-// GetConfig возвращает текущую конфигурацию
 func (a *App) GetConfig() Config {
 	return a.config
 }
 
-// SetInterval задаёт интервал смены кадров (в секундах, минимум 1)
 func (a *App) SetInterval(seconds int) {
 	if seconds < 1 {
 		seconds = 1
@@ -149,13 +150,11 @@ func (a *App) SetInterval(seconds int) {
 	a.saveConfig()
 }
 
-// SetShuffle включает/выключает случайный порядок
 func (a *App) SetShuffle(enabled bool) {
 	a.config.Shuffle = enabled
 	a.saveConfig()
 }
 
-// SetLoop включает/выключает зацикливание
 func (a *App) SetLoop(enabled bool) {
 	a.config.Loop = enabled
 	a.saveConfig()
@@ -163,7 +162,6 @@ func (a *App) SetLoop(enabled bool) {
 
 // --- Предзагрузка ---
 
-// PreloadImages запускает фоновую предзагрузку следующих N изображений
 func (a *App) PreloadImages(paths []string) {
 	if a.preloader != nil {
 		a.preloader.Preload(paths)
@@ -172,28 +170,22 @@ func (a *App) PreloadImages(paths []string) {
 
 // --- Работа с изображениями ---
 
-// decodeImageConfig определяет размеры изображения (без полной декомпрессии)
+// decodeImageConfig определяет размеры изображения через image.DecodeConfig
+// Требует blank-import форматов (jpeg, png, gif, webp)
 func decodeImageConfig(data []byte, ext string) (width, height int) {
-	ext = strings.ToLower(ext)
-
-	// Для AVIF нет встроенного декодера — пропускаем
-	if ext == ".avif" {
+	// AVIF не поддерживается — пропускаем
+	if strings.ToLower(ext) == ".avif" {
 		return 0, 0
 	}
 
-	// Пробуем стандартные декодеры
-	var cfg image.Config
-	var err error
-
-	cfg, _, err = image.DecodeConfig(bytes.NewReader(data))
-
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return 0, 0
 	}
 	return cfg.Width, cfg.Height
 }
 
-// GetImageData читает изображение с диска, определяет EXIF-ориентацию,
+// GetImageData читает изображение, определяет EXIF-ориентацию,
 // размеры и возвращает data URI (base64)
 func (a *App) GetImageData(path string) ImageData {
 	result := ImageData{Data: "", Orientation: 1}
@@ -218,13 +210,12 @@ func (a *App) GetImageData(path string) ImageData {
 	result.Data = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 	result.Orientation = readExifOrientation(path)
 
-	// Определяем размеры изображения
-	ext := filepath.Ext(path)
-	w, h := decodeImageConfig(data, ext)
+	// Определяем размеры
+	w, h := decodeImageConfig(data, filepath.Ext(path))
 	result.Width = w
 	result.Height = h
 
-	// Если EXIF говорит о повороте на 90/270 — меняем W/H местами
+	// Если EXIF поворот 90/270 — меняем W/H местами
 	if result.Orientation == 6 || result.Orientation == 8 {
 		result.Width, result.Height = h, w
 	}
@@ -234,7 +225,6 @@ func (a *App) GetImageData(path string) ImageData {
 
 // --- Вспомогательные ---
 
-// GetCurrentTime возвращает текущее время (для отладки)
 func (a *App) GetCurrentTime() string {
 	return time.Now().Format("15:04:05")
 }
