@@ -11,17 +11,21 @@ export class UI {
     this.intervalInput  = document.getElementById('interval-input')
     this.intervalSlider = document.getElementById('interval-slider')
 
-    this._controlsTimeout = null
-    this._bindHover()
+    this._visible = false
+    this._bindToggle()
   }
 
-  setImage(path) {
+  // Путь к файлу: Wails передаёт нативный путь Windows, преобразуем в URI
+  _pathToSrc(filePath) {
+    // Заменяем обратные слеши на прямые и кодируем спецсимволы
+    const normalized = filePath.replace(/\\/g, '/')
+    return 'wails://localhost/' + normalized.split('/').map(encodeURIComponent).join('/')
+  }
+
+  setImage(filePath) {
     this.imgEl.classList.add('fade-out')
     setTimeout(() => {
-      // Wails передаёт нативный путь — оборачиваем в URL
-      this.imgEl.src = `data-path:${encodeURIComponent(path)}`
-      // Для Wails используем прямой путь через asset handler
-      this.imgEl.src = path.replace(/\\/g, '/')
+      this.imgEl.src = this._pathToSrc(filePath)
       this.imgEl.classList.remove('fade-out')
       this.imgEl.classList.add('fade-in')
     }, 200)
@@ -33,7 +37,7 @@ export class UI {
   }
 
   setCounter(current, total) {
-    this.counter.textContent = `${current} / ${total}`
+    this.counter.textContent = `${current} / ${total}`
   }
 
   setName(name) {
@@ -56,13 +60,18 @@ export class UI {
     this.setPlayState(slider.playing)
   }
 
+  // Панель показывается / скрывается только по явному действию
+  toggleControls() {
+    this._visible ? this.hideControls() : this.showControls()
+  }
+
   showControls() {
+    this._visible = true
     this.controls.classList.add('visible')
-    clearTimeout(this._controlsTimeout)
-    this._controlsTimeout = setTimeout(() => this.hideControls(), 3000)
   }
 
   hideControls() {
+    this._visible = false
     this.controls.classList.remove('visible')
   }
 
@@ -74,9 +83,15 @@ export class UI {
     }
   }
 
-  _bindHover() {
-    // Панель управления появляется при движении мыши, скрывается через 3 сек
-    document.addEventListener('mousemove', () => this.showControls())
-    document.addEventListener('click',     () => this.showControls())
+  // Клик по экрану — переключить панель;
+  // клик по кнопке панели — не скрывать
+  _bindToggle() {
+    document.addEventListener('click', (e) => {
+      const inControls = this.controls.contains(e.target)
+      const inEmpty    = this.emptyState.contains(e.target)
+      if (!inControls && !inEmpty) {
+        this.toggleControls()
+      }
+    })
   }
 }
